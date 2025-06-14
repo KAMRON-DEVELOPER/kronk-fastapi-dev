@@ -1,0 +1,80 @@
+[project]
+name = "kronk"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "fastapi-cli",
+    "uvicorn",
+    "uvloop",
+    "python-multipart",
+    "jinja2",
+    "httpx",
+    "asyncpg",
+    "sqlalchemy",
+    "pydantic",
+    "pydantic-settings",
+    "pydantic-async-validation",
+    "aiofiles",
+    "aiohttp",
+    "python-dateutil",
+    "bcrypt",
+    "fastapi-jwt[authlib]",
+    "passlib",
+    "firebase-admin",
+    "miniopy-async",
+    "modern-colorthief",
+    "opencv-python-headless",
+    "pillow",
+    "coredis",
+    "redis",
+    "python-ffmpeg",
+    "pymediainfo",
+    "prometheus-fastapi-instrumentator>=7.1.0",
+]
+
+[tool.pyright]
+include = ["."]
+venvPath = "./"
+venv = ".venv"
+extraPaths = [".venv", ".env", "venv", "env"]
+typeCheckingMode = "standart"
+pythonVersion = "3.12"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 280
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+mypy_path = [".venv", ".env", "venv", "env"]
+files = ["./"]
+strict = true
+ignore_missing_imports = true
+
+[tool.black]
+line-length = 220
+target-version = ["py312"]
+
+[tool.ty.src]
+root = "./"
+
+[tool.ty.environment]
+python = "./.venv"
+python-version = "3.12"
+
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.29.1",
+    "black",
+    "ipython",
+    "isort",
+    "loguru",
+    "python-json-logger",
+    "types-redis",
+]

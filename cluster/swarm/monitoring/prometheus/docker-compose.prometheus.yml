@@ -1,0 +1,61 @@
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    # user: root #
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.size=5GB"
+      - "--storage.tsdb.retention.time=15d"
+    ports:
+      - mode: host
+        target: 9090
+        published: 9090
+    volumes:
+      # - /var/run/docker.sock:/var/run/docker.sock:ro
+      - prometheus_storage:/prometheus
+      - ./config.yml:/etc/prometheus/prometheus.yml
+
+    networks:
+      - traefik-network
+      - monitoring-network
+    deploy:
+      labels:
+        - "traefik.enable=true"
+
+        # Mandatory by swarm
+        - "traefik.http.services.prometheus_service.loadbalancer.server.port=9090"
+
+        # HTTP
+        - "traefik.http.routers.prometheus_http.rule=Host(`prometheus.kronk.uz`)"
+        - "traefik.http.routers.prometheus_http.entrypoints=http"
+        - "traefik.http.routers.prometheus_http.middlewares=prometheus_middleware"
+
+        # HTTPS
+        - "traefik.http.routers.prometheus_https.rule=Host(`prometheus.kronk.uz`)"
+        - "traefik.http.routers.prometheus_https.entrypoints=https"
+        - "traefik.http.routers.prometheus_https.tls=true"
+        - "traefik.http.routers.prometheus_https.tls.certresolver=leresolver"
+
+        # Middleware
+        - "traefik.http.middlewares.prometheus_middleware.redirectscheme.scheme=https"
+        - "traefik.http.middlewares.prometheus_middleware.redirectscheme.permanent=true"
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints: [node.role == manager]
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+networks:
+  traefik-network:
+    external: true
+    driver: overlay
+  monitoring-network:
+    external: true
+    driver: overlay
+
+volumes:
+  prometheus_storage:
+    driver: local

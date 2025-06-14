@@ -1,0 +1,27 @@
+version: "3.8"
+
+services:
+  alertmanager:
+    image: prom/alertmanager:latest
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alertmanager/config.yml:/etc/alertmanager/config.yml
+    networks:
+      - monitoring-network
+    command:
+      - "-config.file=/etc/alertmanager/config.yml"
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: 0.2
+          memory: 200M
+
+networks:
+  monitoring-network:
+    external: true
+    driver: overlay

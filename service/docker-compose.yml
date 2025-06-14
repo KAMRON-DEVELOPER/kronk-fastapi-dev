@@ -1,0 +1,72 @@
+services:
+  postgres:
+    image: postgres:alpine
+    container_name: postgres_container
+    restart: always
+    env_file:
+      - ./.env
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./volumes/postgres_storage:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+
+  redis:
+    image: redis/redis-stack-server:latest
+    container_name: redis_container
+    restart: always
+    command:
+      [
+        "redis-server",
+        "/redis-stack.conf",
+        "--requirepass",
+        "${REDIS_PASSWORD}",
+      ]
+    env_file:
+      - ./.env
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./configurations/redis-stack.conf:/redis-stack.conf:ro
+      - ./volumes/redis_storage:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD} ping | grep PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio_container
+    restart: always
+    command: minio server /minio_storage
+    env_file:
+      - ./.env
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - ./volumes/minio_storage:/minio_storage
+
+  redisinsight:
+    image: redis/redisinsight:latest
+    container_name: redisinsight_container
+    restart: always
+    ports:
+      - "5540:5540"
+    volumes:
+      - redisinsight_storage:/data
+
+volumes:
+  postgres_storage:
+    name: postgres_storage_volume
+  redis_storage:
+    name: redis_storage_volume
+  minio_storage:
+    name: minio_storage_volume
+  redisinsight_storage:
+    name: redisinsight_storage_volume

@@ -1,0 +1,113 @@
+services:
+  fastapi:
+    image: kamronbekdev/kronk-fastapi-alpha:2.1
+    ports:
+      - mode: ingress
+        target: 8000
+        published: 8000
+    networks:
+      - traefik-network
+    secrets:
+      - DATABASE_URL
+
+      - REDIS_URL
+
+      - SECRET_KEY
+      - REFRESH_TOKEN_EXPIRE_TIME
+      - ACCESS_TOKEN_EXPIRE_TIME
+      - ALGORITHM
+
+      - MINIO_BUCKET_NAME
+      - MINIO_ENDPOINT
+      - MINIO_ROOT_PASSWORD
+      - MINIO_ROOT_USER
+
+      - EMAIL_SERVICE_API_KEY
+
+      - AZURE_TRANSLATOR_ENDPOINT
+      - AZURE_TRANSLATOR_KEY
+      - AZURE_TRANSLATOR_REGION
+
+      - FIREBASE_ADMINSDK_PROD
+    deploy:
+      replicas: 6
+      placement:
+        constraints:
+          - node.role == worker
+      labels:
+        - "prometheus-job=fastapi"
+
+        - "traefik.enable=true"
+
+        # Mandatory by swarm
+        - "traefik.http.services.fastapi_service.loadbalancer.server.port=8000"
+
+        # HTTP Router (Redirects to HTTPS)
+        - "traefik.http.routers.fastapi_http.rule=Host(`api.kronk.uz`)"
+        - "traefik.http.routers.fastapi_http.entrypoints=http"
+        - "traefik.http.routers.fastapi_http.middlewares=fastapi_middleware"
+
+        # HTTPS Router
+        - "traefik.http.routers.fastapi_https.rule=Host(`api.kronk.uz`)"
+        - "traefik.http.routers.fastapi_https.entrypoints=https"
+        - "traefik.http.routers.fastapi_https.tls=true"
+        - "traefik.http.routers.fastapi_https.tls.certresolver=leresolver"
+
+        # Middleware
+        - "traefik.http.middlewares.fastapi_middleware.redirectscheme.scheme=https"
+        - "traefik.http.middlewares.fastapi_middleware.redirectscheme.permanent=true"
+
+        # Health Check
+        # - "traefik.http.services.fastapi_service.loadbalancer.healthcheck.hostname=api.kronk.uz" # optional
+        # - "traefik.http.services.fastapi_service.loadbalancer.healthcheck.path=/healthy" # required
+        # - "traefik.http.services.fastapi_service.loadbalancer.healthcheck.interval=60s" # default: 30s
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+      update_config:
+        order: stop-first
+        parallelism: 1
+
+networks:
+  traefik-network:
+    external: true
+    driver: overlay
+
+secrets:
+  DATABASE_URL:
+    external: true
+
+  REDIS_URL:
+    external: true
+
+  SECRET_KEY:
+    external: true
+  REFRESH_TOKEN_EXPIRE_TIME:
+    external: true
+  ACCESS_TOKEN_EXPIRE_TIME:
+    external: true
+  ALGORITHM:
+    external: true
+
+  MINIO_BUCKET_NAME:
+    external: true
+  MINIO_ENDPOINT:
+    external: true
+  MINIO_ROOT_PASSWORD:
+    external: true
+  MINIO_ROOT_USER:
+    external: true
+
+  EMAIL_SERVICE_API_KEY:
+    external: true
+
+  AZURE_TRANSLATOR_ENDPOINT:
+    external: true
+  AZURE_TRANSLATOR_KEY:
+    external: true
+  AZURE_TRANSLATOR_REGION:
+    external: true
+
+  FIREBASE_ADMINSDK_PROD:
+    external: true

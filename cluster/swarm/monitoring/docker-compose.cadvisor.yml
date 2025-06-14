@@ -1,0 +1,43 @@
+services:
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor
+    command: -docker_only
+    ports:
+      - mode: host
+        target: 8080
+        published: 8080
+    volumes:
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        read_only: true
+      - type: bind
+        source: /
+        target: /rootfs
+        read_only: true
+      - type: bind
+        source: /var/run
+        target: /var/run
+      - type: bind
+        source: /sys
+        target: /sys
+        read_only: true
+      - type: bind
+        source: /var/lib/docker
+        target: /var/lib/docker
+        read_only: true
+    networks:
+      monitoring-network:
+    deploy:
+      mode: global
+      labels:
+        - "prometheus-job=cadvisor"
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+networks:
+  monitoring-network:
+    external: true
+    driver: overlay

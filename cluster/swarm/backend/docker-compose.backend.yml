@@ -1,0 +1,65 @@
+services:
+  fastapi:
+    image: kamronbekdev/fastapi:v2.0
+    ports:
+      - mode: ingress
+        target: 8000
+        published: 8000
+    networks:
+      - traefik-network
+    secrets:
+      - DB_URL
+      - REDIS_URL
+    # environment:
+    #   DB_URL: /run/secrets/db_url
+    #   REDIS_URL: /run/secrets/redis_url
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == worker
+      labels:
+        - "prometheus-job=fastapi"
+
+        - "traefik.enable=true"
+
+        # Mandatory by swarm
+        - "traefik.http.services.fastapi_service.loadbalancer.server.port=8000"
+
+        # HTTP Router (Redirects to HTTPS)
+        - "traefik.http.routers.fastapi_http.rule=Host(`api.kronk.uz`)"
+        - "traefik.http.routers.fastapi_http.entrypoints=http"
+        - "traefik.http.routers.fastapi_http.middlewares=fastapi_middleware"
+
+        # HTTPS Router
+        - "traefik.http.routers.fastapi_https.rule=Host(`api.kronk.uz`)"
+        - "traefik.http.routers.fastapi_https.entrypoints=https"
+        - "traefik.http.routers.fastapi_https.tls=true"
+        - "traefik.http.routers.fastapi_https.tls.certresolver=leresolver"
+
+        # Middleware
+        - "traefik.http.middlewares.fastapi_middleware.redirectscheme.scheme=https"
+        - "traefik.http.middlewares.fastapi_middleware.redirectscheme.permanent=true"
+
+        # Health Check
+        # - "traefik.http.services.fastapi_service.loadbalancer.healthcheck.hostname=api.kronk.uz" # optional
+        # - "traefik.http.services.fastapi_service.loadbalancer.healthcheck.path=/healthy" # required
+        # - "traefik.http.services.fastapi_service.loadbalancer.healthcheck.interval=60s" # default: 30s
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+      update_config:
+        order: stop-first
+        parallelism: 1
+
+networks:
+  traefik-network:
+    external: true
+    driver: overlay
+
+secrets:
+  DB_URL:
+    external: true
+  REDIS_URL:
+    external: true

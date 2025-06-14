@@ -1,0 +1,45 @@
+version: "3.8"
+
+services:
+  node_exporter:
+    image: prom/node-exporter:latest
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/rootfs"
+    ports:
+      - mode: host
+        target: 9100
+        published: 9100
+    volumes:
+      - type: bind
+        source: /proc
+        target: /host/proc
+        read_only: true
+      - type: bind
+        source: /sys
+        target: /host/sys
+        read_only: true
+      - type: bind
+        source: /
+        target: /rootfs
+        read_only: true
+    # volumes:
+    #   - /proc:/host/proc:ro
+    #   - /sys:/host/sys:ro
+    #   - /:/rootfs:ro
+    networks:
+      monitoring-network:
+    deploy:
+      mode: global
+      labels:
+        - "prometheus-job=node_exporter"
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+networks:
+  monitoring-network:
+    external: true
+    driver: overlay

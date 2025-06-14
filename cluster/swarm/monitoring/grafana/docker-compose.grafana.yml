@@ -1,0 +1,72 @@
+services:
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - mode: host
+        target: 3000
+        published: 3000
+    volumes:
+      - grafana_storage:/var/lib/grafana
+      - ./provisioning:/etc/grafana/provisioning
+    networks:
+      - traefik-network
+      - monitoring-network
+    secrets:
+      - GF_SECURITY_ADMIN_USER
+      - GF_SECURITY_ADMIN_PASSWORD
+    # environment:
+      # GF_AUTH_DISABLE_LOGIN_FORM: "false"
+      # GF_AUTH_ANONYMOUS_ENABLED: "false"
+      # GF_SECURITY_ADMIN_USER__FILE: /run/secrets/GF_SECURITY_ADMIN_USER
+      # GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/GF_SECURITY_ADMIN_PASSWORD
+      # GF_SECURITY_ADMIN_USER: kamronbek
+      # GF_SECURITY_ADMIN_PASSWORD: kamronbek2003
+    deploy:
+      labels:
+        - "traefik.enable=true"
+        - "prometheus-job=grafana"
+
+        # Mandatory by swarm
+        - "traefik.http.services.grafana_service.loadbalancer.server.port=3000"
+
+        # HTTP Router (Redirects to HTTPS)
+        - "traefik.http.routers.grafana_http.rule=Host(`grafana.kronk.uz`)"
+        - "traefik.http.routers.grafana_http.entrypoints=http"
+        - "traefik.http.routers.grafana_http.middlewares=grafana_middleware"
+
+        # HTTPS Router
+        - "traefik.http.routers.grafana_https.rule=Host(`grafana.kronk.uz`)"
+        - "traefik.http.routers.grafana_https.entrypoints=https"
+        - "traefik.http.routers.grafana_https.tls=true"
+        - "traefik.http.routers.grafana_https.tls.certresolver=leresolver"
+
+        # Middleware
+        - "traefik.http.middlewares.grafana_middleware.redirectscheme.scheme=https"
+        - "traefik.http.middlewares.grafana_middleware.redirectscheme.permanent=true"
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints: [ node.role == manager ]
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+networks:
+  traefik-network:
+    external: true
+    driver: overlay
+  monitoring-network:
+    external: true
+    driver: overlay
+
+volumes:
+  grafana_storage:
+    driver: local
+
+secrets:
+  GF_SECURITY_ADMIN_USER:
+    external: true
+  GF_SECURITY_ADMIN_PASSWORD:
+    external: true
+
