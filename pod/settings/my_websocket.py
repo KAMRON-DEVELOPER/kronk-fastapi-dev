@@ -3,7 +3,6 @@ from typing import Optional
 
 from fastapi import WebSocket
 from redis.asyncio import Redis
-
 from settings.my_exceptions import ApiException
 from settings.my_redis import my_cache_redis
 from utility.my_logger import my_logger

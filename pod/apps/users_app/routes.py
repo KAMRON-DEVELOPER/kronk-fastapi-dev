@@ -3,11 +3,6 @@ from random import randint
 from typing import Optional
 from uuid import UUID
 
-from bcrypt import checkpw, gensalt, hashpw
-from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, status
-from firebase_admin.auth import UserRecord
-from sqlalchemy import select
-
 from apps.users_app.models import UserModel
 from apps.users_app.schemas import (
     ForgotPasswordTokenSchema,
@@ -23,12 +18,16 @@ from apps.users_app.schemas import (
     VerifySchema,
 )
 from apps.users_app.tasks import add_follow_to_db, delete_follow_from_db, notify_settings_stats, send_email_task
+from bcrypt import checkpw, gensalt, hashpw
+from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, status
+from firebase_admin.auth import UserRecord
 from services.firebase_service import validate_firebase_token
 from settings.my_database import DBSession
 from settings.my_dependency import create_jwt_token, headerTokenDependency, jwtDependency
 from settings.my_exceptions import AlreadyExistException, HeaderTokenException, NotFoundException, ValidationException
 from settings.my_minio import put_object_to_minio, remove_objects_from_minio, wipe_objects_from_minio
 from settings.my_redis import cache_manager
+from sqlalchemy import select
 from utility.my_logger import my_logger
 from utility.utility import generate_avatar_url, generate_password_string, generate_unique_username
 from utility.validators import allowed_image_extension, get_file_extension, get_image_dimensions
@@ -280,7 +279,9 @@ async def update_profile_route(jwt: jwtDependency, session: DBSession, schema: P
 
 
 @users_router.patch(path="/profile/update/media", response_model=ResultSchema, status_code=200)
-async def update_profile_media(jwt: jwtDependency, session: DBSession, remove_target: Optional[str] = None, avatar_file: Optional[UploadFile] = None, banner_file: Optional[UploadFile] = None):
+async def update_profile_media(
+    jwt: jwtDependency, session: DBSession, remove_target: Optional[str] = None, avatar_file: Optional[UploadFile] = None, banner_file: Optional[UploadFile] = None
+):
     try:
         if (user := await session.get(UserModel, jwt.user_id)) is None:
             raise NotFoundException(detail="feed not found")

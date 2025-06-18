@@ -1,10 +1,11 @@
 from contextlib import asynccontextmanager
 
+import taskiq_fastapi
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from firebase_admin import initialize_app, credentials
-import taskiq_fastapi
+from firebase_admin import credentials, initialize_app
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from apps.admin_app.routes import admin_router
 from apps.admin_app.ws import admin_ws_router
@@ -17,9 +18,8 @@ from settings.my_config import get_settings
 from settings.my_database import initialize_db
 from settings.my_exceptions import ApiException
 from settings.my_redis import initialize_redis_indexes
-from utility.my_logger import my_logger
-from prometheus_fastapi_instrumentator import Instrumentator
 from settings.my_taskiq import broker
+from utility.my_logger import my_logger
 
 settings = get_settings()
 
@@ -40,6 +40,8 @@ async def app_lifespan(_app: FastAPI):
 
 app: FastAPI = FastAPI(lifespan=app_lifespan)
 instrumentator = Instrumentator().instrument(app)
+
+taskiq_fastapi.init(broker=broker, app_or_path=app)
 
 
 @app.exception_handler(ApiException)
@@ -69,7 +71,7 @@ async def validation_exception_handler(request: Request, exception: RequestValid
 
 
 try:
-    cred = credentials.Certificate(cert="/run/secrets/FIREBASE_ADMINSDK_PROD")
+    cred = credentials.Certificate(cert="/run/secrets/FIREBASE_ADMINSDK_PROD" if settings.DEBUG else settings.FIREBASE_ADMINSDK_DEV)
     default_app = initialize_app(credential=cred)
     my_logger.debug(f"default_app.project_id: {default_app.project_id}")
     my_logger.debug(f"default_app.project_id: {default_app.name}")
@@ -79,13 +81,7 @@ except Exception as e:
 
 @app.get(path="/", tags=["root"])
 async def root() -> dict:
-    return {
-        "status": "ok",
-        "DATABASE_URL": settings.DATABASE_URL,
-        "REDIS_URL": settings.REDIS_URL,
-        "MINIO_ENDPOINT": settings.MINIO_ENDPOINT,
-        # "FIREBASE_ADMINSDK_PROD": settings.FIREBASE_ADMINSDK_PROD,
-    }
+    return {"status": "ok"}
 
 
 # HTTP Routes

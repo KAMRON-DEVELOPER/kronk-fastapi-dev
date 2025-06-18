@@ -1,13 +1,13 @@
 from io import BytesIO
+from pathlib import Path
 from typing import Optional
 
 import aiohttp
 from miniopy_async.api import Minio
 from miniopy_async.datatypes import Object
-from pathlib import Path
+
 # from miniopy_async.datatypes import ListObjects, Object
 from miniopy_async.helpers import ObjectWriteResult
-
 from settings.my_config import get_settings
 from utility.my_logger import my_logger
 

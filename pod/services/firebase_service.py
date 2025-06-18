@@ -3,7 +3,6 @@ from functools import partial
 
 from firebase_admin import auth
 from firebase_admin.auth import UserRecord
-
 from settings.my_exceptions import NotFoundException, ValidationException
 
 

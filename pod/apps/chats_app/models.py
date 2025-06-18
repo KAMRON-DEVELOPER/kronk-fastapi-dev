@@ -2,11 +2,10 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
+from apps.users_app.models import BaseModel, UserModel
 from sqlalchemy import ARRAY, TIMESTAMP, Enum, ForeignKey, String, Text, UniqueConstraint, func, select, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship
-
-from apps.users_app.models import BaseModel, UserModel
 from utility.my_enums import GroupType, MemberType
 
 
@@ -45,8 +44,12 @@ class GroupModel(BaseModel):
     group_participants: Mapped[list["GroupParticipantModel"]] = relationship(argument="GroupParticipantModel", back_populates="group", cascade="all, delete-orphan")
     users: Mapped[list["UserModel"]] = relationship(secondary="group_participant_table", back_populates="groups", viewonly=True)
     members_count: Mapped[int] = column_property(select(func.count(GroupParticipantModel.id)).where(text("group_id = id")).scalar_subquery())
-    administrators_count: Mapped[int] = column_property(select(func.count(GroupParticipantModel.id)).where(text("group_id = id")).where(GroupParticipantModel.member_type == MemberType.administrator).scalar_subquery())
-    moderators_count: Mapped[int] = column_property(select(func.count(GroupParticipantModel.id)).where(text("group_id = id")).where(GroupParticipantModel.member_type == MemberType.moderator).scalar_subquery())
+    administrators_count: Mapped[int] = column_property(
+        select(func.count(GroupParticipantModel.id)).where(text("group_id = id")).where(GroupParticipantModel.member_type == MemberType.administrator).scalar_subquery()
+    )
+    moderators_count: Mapped[int] = column_property(
+        select(func.count(GroupParticipantModel.id)).where(text("group_id = id")).where(GroupParticipantModel.member_type == MemberType.moderator).scalar_subquery()
+    )
 
 
 class GroupMessageModel(MessageBaseModel):

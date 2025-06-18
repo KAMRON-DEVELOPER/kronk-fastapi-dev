@@ -1,6 +1,6 @@
+import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -9,11 +9,15 @@ class Settings(BaseSettings):
     BASE_DIR: Path = Path(__file__).parent.parent.parent.resolve()
     TEMP_IMAGES_FOLDER_PATH: Path = Path(__file__).parent.parent.parent.resolve() / "static/images"
     TEMP_VIDEOS_FOLDER_PATH: Path = Path(__file__).parent.parent.resolve() / "static/videos"
+
+    DEBUG: int = 1
+
     DATABASE_URL: str = ""
+
     REDIS_URL: str = ""
     TASKIQ_WORKER_URL: str = ""
     TASKIQ_REDIS_SCHEDULE_SOURCE_URL: str = ""
-    TASKIQ_SCHEDULER_URL: str = ""
+    TASKIQ_RESULT_BACKEND_URL: str = ""
 
     # MINIO
     MINIO_ROOT_USER: str = ""
@@ -47,7 +51,6 @@ class Settings(BaseSettings):
     AZURE_TRANSLATOR_REGION: str = ""
     AZURE_TRANSLATOR_ENDPOINT: str = ""
 
-    # FIREBASE_ADMINSDK_PROD: Optional[str] = None
     FIREBASE_ADMINSDK_DEV: dict = {
         "type": FIREBASE_TYPE,
         "project_id": FIREBASE_PROJECT_ID,
@@ -61,18 +64,7 @@ class Settings(BaseSettings):
         "client_x509_cert_url": FIREBASE_CLIENT_CERT_URL,
     }
 
-    def get_tortoise_orm(self) -> dict:
-        if not self.DATABASE_URL:
-            raise ValueError("DATABASE_URL is not set!")
-        return {
-            "connections": {"default": self.DATABASE_URL},
-            "apps": {
-                "users_app": {"models": ["apps.users_app.models"], "default_connection": "default"},
-                "feeds_app": {"models": ["apps.feeds_app.models"], "default_connection": "default"},
-            },
-        }
-
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore", secrets_dir="/run/secrets")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore", secrets_dir="/run/secrets" if not int(os.getenv("DEBUG", "1")) else None)
 
 
 @lru_cache

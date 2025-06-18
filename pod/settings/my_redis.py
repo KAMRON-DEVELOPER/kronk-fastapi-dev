@@ -2,7 +2,7 @@ import asyncio
 import json
 import math
 import time
-from datetime import datetime, timedelta, date, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -14,7 +14,7 @@ from coredis.modules.search import Field
 from redis.asyncio import Redis as CacheRedis
 from redis.asyncio.client import PubSub
 
-from apps.chats_app.routes import ChatTileSchema
+from apps.chats_app.schemas import ChatTileSchema
 from settings.my_config import get_settings
 from utility.my_enums import EngagementType
 from utility.my_logger import my_logger
@@ -42,7 +42,9 @@ async def redis_ready() -> bool:
 
 async def initialize_redis_indexes() -> None:
     try:
-        await my_search_redis.search.create(index=USER_INDEX_NAME, on=PureToken.HASH, schema=[Field("email", PureToken.TEXT), Field("username", PureToken.TEXT)], prefixes=["users:"])
+        await my_search_redis.search.create(
+            index=USER_INDEX_NAME, on=PureToken.HASH, schema=[Field("email", PureToken.TEXT), Field("username", PureToken.TEXT)], prefixes=["users:"]
+        )
         my_logger.info("User index created/updated")
     except ResponseError as e:
         if "Index already exists" not in str(e):
@@ -269,7 +271,12 @@ class CacheManager:
         for feed in valid_feeds:
             author = user_map.get(feed["author_id"], {})
             feed.update(
-                {"author_avatar_url": author.get("avatar_url"), "author_username": author.get("username"), "author_first_name": author.get("first_name"), "author_last_name": author.get("last_name")},
+                {
+                    "author_avatar_url": author.get("avatar_url"),
+                    "author_username": author.get("username"),
+                    "author_first_name": author.get("first_name"),
+                    "author_last_name": author.get("last_name"),
+                },
             )
 
         return valid_feeds
@@ -675,7 +682,7 @@ class CacheManager:
 
     async def get_chat_tiles(self, user_id: str) -> list[ChatTileSchema]:
         chat_ids = await self.cache_redis.smembers(f"users:{user_id}:chats")
-        
+
         chats: list[dict] = await asyncio.gather(*[self.cache_redis.hgetall(name=f"chats:{chat_id}") for chat_id in chat_ids])
         return [
             ChatTileSchema(
@@ -687,16 +694,15 @@ class CacheManager:
                 last_message="",
                 last_message_seen=True,
                 specified_name="",
-                unread_count=0
+                unread_count=0,
             )
             for chat in chats
         ]
-        
-    
+
     async def delete_chat_tile(self, user_id: str, chat_id: str):
         await self.cache_redis.srem(f"users:{user_id}:chats", chat_id)
         await self.cache_redis.delete(f"chat_tile:{chat_id}:{user_id}")
-    
+
     async def set_chat(self, user_id: str, chat_id: str):
         await self.cache_redis.sadd(f"users:{user_id}:chats", chat_id)
 
@@ -727,7 +733,6 @@ def calculate_score(stats_dict: dict, created_at: float, half_life: float = 36, 
     return (engagement_score * time_decay) + freshness_boost
 
 
-
 def parse_statistics(statistics: dict[str, int]) -> StatisticsSchema:
     today = datetime.now(timezone.utc).date()
     current_year = today.year
@@ -742,18 +747,12 @@ def parse_statistics(statistics: dict[str, int]) -> StatisticsSchema:
         weekly[day_name] = statistics.get(date_str, 0)  # 0 for missing or future days
 
     # Initialize monthly and yearly totals
-    monthly_totals = {
-        "Jan": 0, "Feb": 0, "Mar": 0, "Apr": 0, "May": 0, "Jun": 0,
-        "Jul": 0, "Aug": 0, "Sep": 0, "Oct": 0, "Nov": 0, "Dec": 0
-    }
+    monthly_totals = {"Jan": 0, "Feb": 0, "Mar": 0, "Apr": 0, "May": 0, "Jun": 0, "Jul": 0, "Aug": 0, "Sep": 0, "Oct": 0, "Nov": 0, "Dec": 0}
     yearly_totals = {}
     total_count = 0
 
     # Map month numbers to names
-    month_names = {
-        1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "May", 6: "Jun",
-        7: "Jul", 8: "Aug", 9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec"
-    }
+    month_names = {1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "May", 6: "Jun", 7: "Jul", 8: "Aug", 9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec"}
 
     # Process statistics dictionary
     for date_str, count in statistics.items():

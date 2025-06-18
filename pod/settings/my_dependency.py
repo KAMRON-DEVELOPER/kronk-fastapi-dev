@@ -5,7 +5,6 @@ from uuid import UUID
 from authlib.jose import JWTClaims, jwt
 from authlib.jose.errors import BadSignatureError, DecodeError, ExpiredTokenError, InvalidTokenError, KeyMismatchError
 from fastapi import Depends, Header, WebSocket, WebSocketException, status
-
 from settings.my_config import get_settings
 from settings.my_exceptions import ApiException, JWTDecodeException, JWTExpiredException, JWTSignatureException, UnauthorizedException
 

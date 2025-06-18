@@ -4,7 +4,6 @@ from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel, field_validator
-
 from settings.my_exceptions import ValidationException
 from utility.my_enums import FollowPolicy, UserRole, UserStatus
 from utility.validators import validate_email, validate_length, validate_password, validate_phone_number, validate_username, violent_words_regex
@@ -15,7 +14,7 @@ class RegisterSchema(BaseModel):
     username: str
     email: str
     password: str
-    
+
     @field_validator("name")
     def validate_name(cls, value: str):
         validate_length(field=value, min_len=2, max_len=30, field_name="Name")

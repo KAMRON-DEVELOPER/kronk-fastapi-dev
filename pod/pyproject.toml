@@ -5,44 +5,44 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-  "fastapi",
-  "fastapi-cli",
-  "uvicorn",
-  "uvloop",
-  "python-multipart",
-  "jinja2",
-  "httpx",
-  "asyncpg",
-  "sqlalchemy",
-  "pydantic",
-  "pydantic-settings",
-  "pydantic-async-validation",
-  "aiofiles",
-  "aiohttp",
-  "python-dateutil",
-  "bcrypt",
-  "fastapi-jwt[authlib]",
-  "passlib",
-  "firebase-admin",
-  "miniopy-async",
-  "modern-colorthief",
-  "opencv-python-headless",
-  "pillow",
-  "coredis",
-  "redis",
-  "python-ffmpeg",
-  "pymediainfo",
-  "prometheus-fastapi-instrumentator",
-  "taskiq",
-  "taskiq_redis",
-  "taskiq-fastapi",
+    "fastapi",
+    "fastapi-cli",
+    "uvicorn",
+    "uvloop",
+    "python-multipart",
+    "jinja2",
+    "httpx",
+    "asyncpg",
+    "sqlalchemy",
+    "pydantic",
+    "pydantic-settings",
+    "pydantic-async-validation",
+    "aiofiles",
+    "aiohttp",
+    "python-dateutil",
+    "bcrypt",
+    "fastapi-jwt[authlib]",
+    "passlib",
+    "firebase-admin",
+    "miniopy-async",
+    "modern-colorthief",
+    "opencv-python-headless",
+    "pillow",
+    "coredis",
+    "redis",
+    "python-ffmpeg",
+    "pymediainfo",
+    "prometheus-fastapi-instrumentator",
+    "taskiq[reload]",
+    "taskiq_redis",
+    "taskiq-fastapi",
 ]
 
 [tool.pyright]
 include = ["."]
 venvPath = "./"
 venv = ".venv"
-extraPaths = [".venv", ".env", "venv", "env"]
+extraPaths = [".venv", ".env", "venv", "env", "pod/.venv"]
 typeCheckingMode = "standard"
 pythonVersion = "3.13"
 
@@ -73,11 +73,11 @@ python-version = "3.13"
 
 [dependency-groups]
 dev = [
-  "basedpyright",
-  "black",
-  "ipython",
-  "isort",
-  "loguru",
-  "python-json-logger",
-  "types-redis",
+    "basedpyright",
+    "black",
+    "ipython",
+    "isort",
+    "loguru",
+    "python-json-logger",
+    "types-redis",
 ]

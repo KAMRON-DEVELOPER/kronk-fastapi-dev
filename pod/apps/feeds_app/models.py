@@ -1,10 +1,9 @@
 from datetime import datetime
 from typing import Optional
 
+from apps.users_app.models import BaseModel, UserModel
 from sqlalchemy import ARRAY, TIMESTAMP, UUID, Enum, ForeignKey, String, UniqueConstraint, func, select
 from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship
-
-from apps.users_app.models import BaseModel, UserModel
 from utility.my_enums import CommentMode, EngagementType, FeedVisibility, ReportReason
 
 

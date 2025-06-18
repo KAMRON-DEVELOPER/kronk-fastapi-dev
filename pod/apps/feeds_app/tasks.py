@@ -1,11 +1,11 @@
 import asyncio
 from typing import Annotated
 
+from redis.asyncio import Redis
 from taskiq import TaskiqDepends
 
-from apps.users_app.tasks import broker
 from settings.my_redis import cache_manager, pubsub_manager
-from redis.asyncio import Redis
+from settings.my_taskiq import broker
 from settings.my_websocket import my_cache_redis
 from utility.my_enums import PubSubTopics
 from utility.my_logger import my_logger
@@ -29,10 +29,11 @@ async def notify_followers_task(user_id: str):
     my_logger.info(f"📣 Notified {len(online_followers)} followers of {user_id}")
 
 
-@broker.task(task_name="recalculate_feed_stats", schedule=[{"cron": "*/10 * * * *"}])
+@broker.task(task_name="recalculate_feed_stats", schedule=[{"cron": "* * * * *"}])
 async def recalculate_feed_stats(cache: Annotated[Redis, TaskiqDepends(lambda: my_cache_redis)]):
     my_logger.debug(f"recalculate_feed_stats starting...")
-    
+    my_logger.debug(f"cache users count: {await cache.hget(name='users', key='count')}")
+    await cache.hincrby(name="users", key="count")
     # TODO get feeds
-    
+
     return {"ok": True}

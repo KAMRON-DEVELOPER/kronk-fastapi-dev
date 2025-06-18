@@ -6,12 +6,21 @@ from sqlalchemy import TIMESTAMP
 from sqlalchemy import UUID as PG_UUID
 from sqlalchemy import DateTime, Enum, ForeignKey, String, UniqueConstraint, func, select, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, column_property, mapped_column, relationship
-
 from utility.my_enums import FollowPolicy, FollowStatus, UserRole, UserStatus
 
 if TYPE_CHECKING:
     from ..chats_app.models import ChatMessageModel, ChatModel, ChatParticipantModel, GroupMessageModel, GroupModel, GroupParticipantModel
-    from ..feeds_app.models import FeedBookmarkModel, FeedCommentEngagementModel, FeedCommentModel, FeedCommentViewModel, FeedEngagementModel, FeedModel, FeedReportModel, FeedViewModel, RepostModel
+    from ..feeds_app.models import (
+        FeedBookmarkModel,
+        FeedCommentEngagementModel,
+        FeedCommentModel,
+        FeedCommentViewModel,
+        FeedEngagementModel,
+        FeedModel,
+        FeedReportModel,
+        FeedViewModel,
+        RepostModel,
+    )
 
 
 class Base(DeclarativeBase):
@@ -60,8 +69,12 @@ class UserModel(BaseModel):
     followers_count: Mapped[int] = column_property(select(func.count(FollowModel.id)).where(text("following_id = id")).correlate_except(FollowModel).scalar_subquery())
     followings_count: Mapped[int] = column_property(select(func.count(FollowModel.id)).where(text("follower_id = id")).correlate_except(FollowModel).scalar_subquery())
 
-    followers: Mapped[list["FollowModel"]] = relationship(argument="FollowModel", back_populates="following", foreign_keys="[FollowModel.following_id]", cascade="all, delete-orphan")
-    followings: Mapped[list["FollowModel"]] = relationship(argument="FollowModel", back_populates="follower", foreign_keys="[FollowModel.follower_id]", cascade="all, delete-orphan")
+    followers: Mapped[list["FollowModel"]] = relationship(
+        argument="FollowModel", back_populates="following", foreign_keys="[FollowModel.following_id]", cascade="all, delete-orphan"
+    )
+    followings: Mapped[list["FollowModel"]] = relationship(
+        argument="FollowModel", back_populates="follower", foreign_keys="[FollowModel.follower_id]", cascade="all, delete-orphan"
+    )
     feeds: Mapped[list["FeedModel"]] = relationship(argument="FeedModel", back_populates="author")
     reposts: Mapped[list["RepostModel"]] = relationship(argument="RepostModel", back_populates="user")
     feed_comments: Mapped[list["FeedCommentModel"]] = relationship(argument="FeedCommentModel", back_populates="user")

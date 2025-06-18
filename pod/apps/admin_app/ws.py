@@ -2,7 +2,6 @@ import asyncio
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from redis.asyncio.client import PubSub
-
 from settings.my_redis import cache_manager, pubsub_manager
 from settings.my_websocket import admin_ws_manager, settings_ws_manager
 from utility.my_enums import PubSubTopics

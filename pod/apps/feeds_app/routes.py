@@ -1,21 +1,20 @@
-from typing import Optional, Annotated
+from typing import Annotated, Optional
 from uuid import UUID
 
 import aiofiles
-from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, status, Form
-from ffmpeg.asyncio import FFmpeg
-from sqlalchemy import Result, select
-
 from apps.feeds_app.models import CategoryModel, EngagementType, FeedModel, TagModel
 from apps.feeds_app.schemas import FeedCreateSchema, FeedSchema
 from apps.feeds_app.tasks import notify_followers_task
 from apps.users_app.schemas import ResultSchema
+from fastapi import APIRouter, BackgroundTasks, Form, HTTPException, UploadFile, status
+from ffmpeg.asyncio import FFmpeg
 from settings.my_config import get_settings
 from settings.my_database import DBSession
 from settings.my_dependency import JWTCredential, jwtDependency
 from settings.my_exceptions import NotFoundException, ValidationException
 from settings.my_minio import put_file_to_minio, put_object_to_minio, remove_objects_from_minio
 from settings.my_redis import cache_manager
+from sqlalchemy import Result, select
 from utility.my_logger import my_logger
 from utility.validators import allowed_image_extension, allowed_video_extension, get_file_extension, get_video_duration_using_ffprobe
 
@@ -77,12 +76,12 @@ async def create_feed_route(jwt: jwtDependency, session: DBSession, bgt: Backgro
 
 @feed_router.patch(path="/update", status_code=200)
 async def update_feed_route(
-        _: jwtDependency,
-        session: DBSession,
-        feed_id: UUID,
-        body: Annotated[Optional[str], Form()] = None,
-        remove_image_targets: Annotated[Optional[list[str]], Form()] = None,
-        remove_video_target: Annotated[Optional[str], Form()] = None,
+    _: jwtDependency,
+    session: DBSession,
+    feed_id: UUID,
+    body: Annotated[Optional[str], Form()] = None,
+    remove_image_targets: Annotated[Optional[list[str]], Form()] = None,
+    remove_video_target: Annotated[Optional[str], Form()] = None,
 ):
     try:
         my_logger.debug(f"body: {body}")
@@ -300,7 +299,7 @@ async def validate_and_save_video(jwt: JWTCredential, video_file: UploadFile):
     faststart_folder = temp_folder / "faststart"
     temp_folder.mkdir(parents=True, exist_ok=True)
     faststart_folder.mkdir(parents=True, exist_ok=True)
-    
+
     if video_file.filename is None:
         raise ValidationException(detail="filename is not set.")
 

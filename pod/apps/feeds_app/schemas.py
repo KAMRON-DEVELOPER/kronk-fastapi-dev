@@ -3,7 +3,6 @@ from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel, field_validator
-
 from settings.my_exceptions import ValidationException
 from utility.my_enums import CommentMode, FeedVisibility
 from utility.my_logger import my_logger
@@ -44,6 +43,7 @@ class FeedCreateSchema(BaseModel):
             raise ValidationException(f"{exception}")
         return value
 
+
 class DummySchema1(BaseModel):
     feed_body: Optional[str] = None
 
@@ -53,6 +53,7 @@ class DummySchema1(BaseModel):
             raise ValueError("body is required.")
         if len(value) > 200:
             raise ValueError("body is exceeded max 200 character limit.")
+
 
 class DummySchema(BaseModel):
     feed_body: Optional[str] = None

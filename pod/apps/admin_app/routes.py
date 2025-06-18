@@ -1,5 +1,4 @@
 from fastapi import APIRouter
-
 from settings.my_minio import minio_ready
 from settings.my_redis import redis_ready
 from utility import my_logger

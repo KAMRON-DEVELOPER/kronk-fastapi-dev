@@ -1,11 +1,10 @@
 import asyncio
 from typing import Annotated, AsyncGenerator
 
-from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
-
 from apps.users_app.models import Base
+from fastapi import Depends
 from settings.my_config import get_settings
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from utility.my_logger import my_logger
 
 settings = get_settings()

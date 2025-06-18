@@ -1,7 +1,6 @@
 from typing import Dict, List
 
 import aiohttp
-
 from settings.my_config import get_settings
 
 
