@@ -32,7 +32,8 @@ async def home_timeline(websocket_dependency: websocketDependency):
     except WebSocketDisconnect:
         my_logger.info(f"WebSocket disconnected: {user_id}")
     finally:
-        await _cleanup_connection(user_id, pubsub, listener_task, receiver_task)
+        if pubsub is not None:
+            await _cleanup_connection(user_id, pubsub, listener_task, receiver_task)
 
 
 async def _pubsub_listener(pubsub: PubSub, websocket: WebSocket):

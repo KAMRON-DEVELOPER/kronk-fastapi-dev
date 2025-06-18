@@ -38,7 +38,7 @@ async def create_feed_route(jwt: jwtDependency, session: DBSession, bgt: Backgro
     try:
         # 1. Validate category existence
         if schema.category:
-            category_exists: Optional[CategoryModel] = await session.scalar(select(CategoryModel.id).where(CategoryModel.id == schema.category))
+            category_exists: Optional[CategoryModel] = await session.scalar(select(CategoryModel).where(CategoryModel.id == schema.category))
             if not category_exists:
                 raise HTTPException(status_code=400, detail="Invalid category ID.")
 
@@ -217,7 +217,7 @@ async def feed_track_remove(feed_id: str, action: EngagementType, jwt: jwtDepend
 @feed_router.post(path="/comments/{comment_id}/reaction", status_code=status.HTTP_200_OK)
 async def track_feed_comment_view_route(comment_id: str, jwt: jwtDependency):
     try:
-        await cache_manager.mark_comment_as_viewed(user_id=jwt.user_id.hex, comment_id=comment_id)
+        # await cache_manager.mark(user_id=jwt.user_id.hex, comment_id=comment_id)
         return {"status": "comment view tracked"}
     except Exception as e:
         print(f"Exception in track_feed_comment_view_route: {e}")
@@ -227,7 +227,7 @@ async def track_feed_comment_view_route(comment_id: str, jwt: jwtDependency):
 @feed_router.post(path="/comments{comment_id}/reaction", status_code=status.HTTP_200_OK)
 async def track_feed_comment_reaction_route(comment_id: str, reaction: EngagementType, jwt: jwtDependency):
     try:
-        await cache_manager.track_user_reaction_to_comment(user_id=jwt.user_id.hex, comment_id=comment_id, reaction=reaction)
+        # await cache_manager.track_user_reaction_to_comment(user_id=jwt.user_id.hex, comment_id=comment_id, reaction=reaction)
         return {"status": "comment reaction tracked"}
     except Exception as e:
         print(f"Exception in track_feed_comment_view_route: {e}")
@@ -300,6 +300,9 @@ async def validate_and_save_video(jwt: JWTCredential, video_file: UploadFile):
     faststart_folder = temp_folder / "faststart"
     temp_folder.mkdir(parents=True, exist_ok=True)
     faststart_folder.mkdir(parents=True, exist_ok=True)
+    
+    if video_file.filename is None:
+        raise ValidationException(detail="filename is not set.")
 
     temp_video_path = temp_folder / video_file.filename
     faststart_video_path = faststart_folder / video_file.filename

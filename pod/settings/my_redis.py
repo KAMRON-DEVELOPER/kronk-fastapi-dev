@@ -14,6 +14,7 @@ from coredis.modules.search import Field
 from redis.asyncio import Redis as CacheRedis
 from redis.asyncio.client import PubSub
 
+from apps.chats_app.routes import ChatTileSchema
 from settings.my_config import get_settings
 from utility.my_enums import EngagementType
 from utility.my_logger import my_logger
@@ -140,7 +141,8 @@ class CacheManager:
                 # my_logger.debug("************************************************************")
 
                 if user_id is not None:
-                    _user_id = document.id.split(":")[1]
+                    id: str = str(document.id)
+                    _user_id = id.split(":")[1]
                     is_following = await self.cache_redis.sismember(name=f"users:{_user_id}:followers", value=user_id)
                     my_logger.debug(f"is_following: {is_following}")
                     users.append({**document.properties, "is_following": bool(is_following)})
@@ -666,6 +668,42 @@ class CacheManager:
             if current_cursor == 0:
                 break
 
+    # ************************************************************** CHAT **************************************************************
+    async def create_chat_tile(self, user_id: str, chat_id: str, mapping: dict):
+        key = f"chat_tile:{chat_id}:{user_id}"
+        await self.cache_redis.hset(key, mapping=mapping)
+
+    async def get_chat_tiles(self, user_id: str) -> list[ChatTileSchema]:
+        chat_ids = await self.cache_redis.smembers(f"users:{user_id}:chats")
+        
+        chats: list[dict] = await asyncio.gather(*[self.cache_redis.hgetall(name=f"chats:{chat_id}") for chat_id in chat_ids])
+        return [
+            ChatTileSchema(
+                chat_id=chat["id"],
+                user_id=chat["user_id"],
+                name="",
+                avatar_url="",
+                last_activity_at=datetime.now(),
+                last_message="",
+                last_message_seen=True,
+                specified_name="",
+                unread_count=0
+            )
+            for chat in chats
+        ]
+        
+    
+    async def delete_chat_tile(self, user_id: str, chat_id: str):
+        await self.cache_redis.srem(f"users:{user_id}:chats", chat_id)
+        await self.cache_redis.delete(f"chat_tile:{chat_id}:{user_id}")
+    
+    async def set_chat(self, user_id: str, chat_id: str):
+        await self.cache_redis.sadd(f"users:{user_id}:chats", chat_id)
+
+    async def delete_chat(self, user_id: str, chat_id: str):
+        await self.cache_redis.srem(f"users:{user_id}:chats", chat_id)
+        await self.cache_redis.delete(f"chat_tile:{chat_id}:{user_id}")
+
 
 def scores_getter(stats: dict) -> tuple[int, int, int, int]:
     return stats.get("comments", 0), stats.get("likes", 0), stats.get("dislikes", 0), stats.get("views", 0)
@@ -688,14 +726,6 @@ def calculate_score(stats_dict: dict, created_at: float, half_life: float = 36, 
     # Final Score
     return (engagement_score * time_decay) + freshness_boost
 
-
-'''
-class StatisticsSchema(BaseModel):
-    weekly: dict[str, int]
-    monthly: dict[str, int]
-    yearly: dict[str, int]
-    total: int
-'''
 
 
 def parse_statistics(statistics: dict[str, int]) -> StatisticsSchema:

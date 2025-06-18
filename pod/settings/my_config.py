@@ -6,9 +6,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    BASE_DIR: Optional[Path] = Path(__file__).parent.parent.parent.resolve()
-    TEMP_IMAGES_FOLDER_PATH: Optional[Path] = Path(__file__).parent.parent.parent.resolve() / "static/images"
-    TEMP_VIDEOS_FOLDER_PATH: Optional[Path] = Path(__file__).parent.parent.resolve() / "static/videos"
+    BASE_DIR: Path = Path(__file__).parent.parent.parent.resolve()
+    TEMP_IMAGES_FOLDER_PATH: Path = Path(__file__).parent.parent.parent.resolve() / "static/images"
+    TEMP_VIDEOS_FOLDER_PATH: Path = Path(__file__).parent.parent.resolve() / "static/videos"
     DATABASE_URL: str = ""
     REDIS_URL: str = ""
     TASKIQ_WORKER_URL: str = ""

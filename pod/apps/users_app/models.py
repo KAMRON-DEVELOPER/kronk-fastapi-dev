@@ -41,8 +41,7 @@ class FollowModel(BaseModel):
 class UserModel(BaseModel):
     __tablename__ = "user_table"
 
-    first_name: Mapped[Optional[str]] = mapped_column(String(length=50), nullable=True)
-    last_name: Mapped[Optional[str]] = mapped_column(String(length=50), nullable=True)
+    name: Mapped[Optional[str]] = mapped_column(String(length=50), nullable=True)
     username: Mapped[str] = mapped_column(String(length=50), index=True)
     email: Mapped[str] = mapped_column(String(length=50), index=True)
     phone_number: Mapped[Optional[str]] = mapped_column(String(length=50), nullable=True)

@@ -16,12 +16,16 @@ class EngagementType(str, Enum):
     like = "likes"
     dislike = "dislikes"
     view = "views"
+    refeed = "refeed"
+    quote = "quote"
 
 
 class EngagementStatus(TypedDict):
     is_liked: bool
     is_disliked: bool
     is_viewed: bool
+    is_refeeded: bool
+    is_quoted: bool
 
 
 class FeedVisibility(str, Enum):

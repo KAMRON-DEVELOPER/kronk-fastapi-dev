@@ -4,6 +4,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from firebase_admin import initialize_app, credentials
+import taskiq_fastapi
 
 from apps.admin_app.routes import admin_router
 from apps.admin_app.ws import admin_ws_router
@@ -13,11 +14,12 @@ from apps.feeds_app.routes import feed_router
 from apps.feeds_app.ws import feed_ws_router
 from apps.users_app.routes import users_router
 from settings.my_config import get_settings
-from settings.my_database import init_db
+from settings.my_database import initialize_db
 from settings.my_exceptions import ApiException
 from settings.my_redis import initialize_redis_indexes
 from utility.my_logger import my_logger
 from prometheus_fastapi_instrumentator import Instrumentator
+from settings.my_taskiq import broker
 
 settings = get_settings()
 
@@ -25,9 +27,15 @@ settings = get_settings()
 @asynccontextmanager
 async def app_lifespan(_app: FastAPI):
     await initialize_redis_indexes()
-    await init_db()
+    await initialize_db()
     instrumentator.expose(_app)
+    if not broker.is_worker_process:
+        print("Starting broker")
+        await broker.startup()
     yield
+    if not broker.is_worker_process:
+        print("Shutting down broker")
+        await broker.shutdown()
 
 
 app: FastAPI = FastAPI(lifespan=app_lifespan)
@@ -77,7 +85,6 @@ async def root() -> dict:
         "REDIS_URL": settings.REDIS_URL,
         "MINIO_ENDPOINT": settings.MINIO_ENDPOINT,
         # "FIREBASE_ADMINSDK_PROD": settings.FIREBASE_ADMINSDK_PROD,
-
     }
 
 

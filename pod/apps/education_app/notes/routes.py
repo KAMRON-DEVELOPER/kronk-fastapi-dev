@@ -16,10 +16,11 @@ async def upload_images(files: list[UploadFile], content_type: str = Header()):
 
     try:
         for file in files:
-            file_path = os.path.join(temp_file_path, file.filename)
-            async with aiofiles.open(file_path, mode="wb") as f:
-                while chunk := await file.read(1024 * 1024):
-                    await f.write(chunk)
+            if file.filename is not None:
+                file_path = os.path.join(temp_file_path, file.filename)
+                async with aiofiles.open(file_path, mode="wb") as f:
+                    while chunk := await file.read(1024 * 1024):
+                        await f.write(chunk)
     except Exception as e:
         print(f"🌋 Exception while writing file: {e}")
 

@@ -8,11 +8,10 @@ from settings.my_redis import cache_manager, pubsub_manager
 from settings.my_websocket import chat_sw_manager
 from utility.my_logger import my_logger
 
-# public_ip:8000/api/v1/ws/chats
 chat_ws_router = APIRouter()
 
 
-@chat_ws_router.websocket("/enter/home")
+@chat_ws_router.websocket("/home")
 async def enter_home(websocket_dependency: websocketDependency):
     user_id = websocket_dependency.user_id.hex
     websocket = websocket_dependency.websocket
@@ -33,13 +32,15 @@ async def enter_home(websocket_dependency: websocketDependency):
     except WebSocketDisconnect:
         my_logger.info(f"WebSocket disconnected: {user_id}")
     finally:
-        await _cleanup_connection(user_id, pubsub, listener_task, receiver_task)
+        if pubsub:
+            await _cleanup_connection(user_id, pubsub, listener_task, receiver_task)
 
 
-@chat_ws_router.websocket("/enter/room")
+@chat_ws_router.websocket("/room")
 async def enter_room(websocket_dependency: websocketDependency):
     try:
-        await chat_sw_manager.connect(user_id=user_id, websocket=websocket)
+        user_id = websocket_dependency.user_id.hex
+        await chat_sw_manager.connect(user_id=user_id, websocket=websocket_dependency.websocket)
         pubsub = await pubsub_manager.subscribe(f"chat:{user_id}:home")
     except Exception as e:
         pass

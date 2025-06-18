@@ -22,11 +22,11 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
 DBSession = Annotated[AsyncSession, Depends(get_session)]
 
 
-async def init_db():
+async def initialize_db():
     async with async_engine.begin() as conn:
         my_logger.debug("Database is initializing...")
         await conn.run_sync(Base.metadata.create_all)
 
 
 if __name__ == "__main__":
-    asyncio.run(init_db())
+    asyncio.run(initialize_db())

@@ -18,7 +18,7 @@ async def admin_statistics_websocket(websocket: WebSocket):
     print("🚧 Client connected")
 
     statistics = await cache_manager.get_statistics()
-    await admin_ws_manager.broadcast(data=statistics)
+    await admin_ws_manager.broadcast(data=statistics.model_dump())
 
     try:
         while True:

@@ -46,7 +46,7 @@ class FeedModel(BaseModel):
     feed_visibility: Mapped[FeedVisibility] = mapped_column(Enum(FeedVisibility, name="feed_visibility"), default=FeedVisibility.public)
     category_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("category_table.id"))
     quoted_feed_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("feed_table.id"))
-    author_username: Mapped[str] = column_property(select(func.count(UserModel.id)).where(UserModel.id == author_id).correlate_except(UserModel).scalar_subquery())
+    author_username: Mapped[str] = column_property(select(UserModel.username).where(UserModel.id == author_id).correlate_except(UserModel).scalar_subquery())
     author: Mapped["UserModel"] = relationship(argument="UserModel", back_populates="feeds")
     category: Mapped[Optional["CategoryModel"]] = relationship(argument="CategoryModel", back_populates="categories")
     feed_comments: Mapped[list["FeedCommentModel"]] = relationship(argument="FeedCommentModel", back_populates="feed")

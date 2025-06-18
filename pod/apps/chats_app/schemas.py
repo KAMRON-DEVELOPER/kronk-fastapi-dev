@@ -8,9 +8,8 @@ from pydantic import BaseModel
 class ChatTileSchema(BaseModel):
     chat_id: UUID
     user_id: UUID
-    username: str
-    first_name: Optional[str]
-    last_name: Optional[str]
+    name: str
+    specified_name: Optional[str]
     avatar_url: Optional[str]
     last_activity_at: datetime
     last_message: Optional[str]

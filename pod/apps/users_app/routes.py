@@ -36,26 +36,6 @@ from utility.validators import allowed_image_extension, get_file_extension, get_
 users_router = APIRouter()
 
 
-@users_router.post(path="/test", response_model=ProfileSchema)
-async def users_test_route(session: DBSession):
-    try:
-        new_user = UserModel(username="kamronbek", email="atajanovkamronbek2003@gmail.com", password="@kamronbek2003")
-
-        session.add(instance=new_user)
-        await session.commit()
-        await session.refresh(instance=new_user)
-
-        profile_schema = ProfileSchema.model_validate(obj=new_user)
-        mapping = profile_schema.model_dump(exclude_unset=True, exclude_defaults=True, exclude_none=True, mode="json")
-
-        my_logger.debug(f"mapping: {mapping}")
-
-        return profile_schema
-    except Exception as e:
-        my_logger.debug(f"Exception e: {e}")
-        raise ValidationException(detail=f"Exception e: {e}")
-
-
 @users_router.post(path="/auth/register", response_model=RegistrationTokenSchema, status_code=201)
 async def register_route(schema: RegisterSchema, htd: headerTokenDependency, bt: BackgroundTasks) -> dict[str, str]:
     if htd.verify_token is not None:

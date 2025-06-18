@@ -11,9 +11,15 @@ from utility.validators import validate_email, validate_length, validate_passwor
 
 
 class RegisterSchema(BaseModel):
+    name: str
     username: str
     email: str
     password: str
+    
+    @field_validator("name")
+    def validate_name(cls, value: str):
+        validate_length(field=value, min_len=2, max_len=30, field_name="Name")
+        return value
 
     @field_validator("username")
     def validate_code(cls, value: str):
@@ -89,8 +95,7 @@ class ProfileSchema(BaseModel):
     id: UUID
     created_at: datetime
     updated_at: datetime
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
+    name: Optional[str] = None
     username: str
     email: str
     phone_number: Optional[str] = None
@@ -114,8 +119,7 @@ class ProfileSchema(BaseModel):
 
 
 class ProfileUpdateSchema(BaseModel):
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
+    name: Optional[str] = None
     username: Optional[str] = None
     email: Optional[str] = None
     phone_number: Optional[str] = None
@@ -153,20 +157,10 @@ class ProfileUpdateSchema(BaseModel):
         validate_password(password_string=value)
         return value
 
-    @field_validator("first_name")
-    def validate_first_name(cls, value: Optional[str]):
+    @field_validator("name")
+    def validate_name(cls, value: Optional[str]):
         if value is not None:
-            validate_length(field=value, min_len=3, max_len=20, field_name="First name")
-            if not value.isalnum():
-                raise ValidationException(detail="First name must contain only alphanumeric characters.")
-        return value
-
-    @field_validator("last_name")
-    def validate_last_name(cls, value: Optional[str]):
-        if value is not None:
-            validate_length(field=value, min_len=3, max_len=20, field_name="Last name")
-            if not value.isalnum():
-                raise ValidationException(detail="Last name must contain only alphanumeric characters.")
+            validate_length(field=value, min_len=2, max_len=30, field_name="Name")
         return value
 
     @field_validator("birthdate")

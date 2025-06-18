@@ -2,9 +2,9 @@ from io import BytesIO
 from typing import Optional
 
 import aiohttp
-from miniopy_async import Minio
+from miniopy_async.api import Minio
 from miniopy_async.datatypes import Object
-
+from pathlib import Path
 # from miniopy_async.datatypes import ListObjects, Object
 from miniopy_async.helpers import ObjectWriteResult
 
@@ -48,12 +48,12 @@ async def put_object_to_minio(object_name: str, data: bytes, old_object_name: Op
         raise ValueError(f"Exception in put_data_to_minio: {e}")
 
 
-async def put_file_to_minio(object_name: str, file_path: str, old_object_name: Optional[str] = None, for_update=False) -> str:
+async def put_file_to_minio(object_name: str, file_path: Path, old_object_name: Optional[str] = None, for_update=False) -> str:
     try:
         if for_update and old_object_name:
             await minio_client.remove_object(bucket_name=settings.MINIO_BUCKET_NAME, object_name=old_object_name)
 
-        result: ObjectWriteResult = await minio_client.fput_object(bucket_name=settings.MINIO_BUCKET_NAME, object_name=object_name, file_path=file_path)
+        result: ObjectWriteResult = await minio_client.fput_object(bucket_name=settings.MINIO_BUCKET_NAME, object_name=object_name, file_path=str(file_path))
 
         return result.object_name
     except Exception as e:
