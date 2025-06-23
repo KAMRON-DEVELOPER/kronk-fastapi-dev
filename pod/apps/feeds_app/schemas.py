@@ -3,8 +3,9 @@ from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel, field_validator
+
 from settings.my_exceptions import ValidationException
-from utility.my_enums import CommentMode, FeedVisibility
+from utility.my_enums import FeedVisibility, CommentPolicy
 from utility.my_logger import my_logger
 
 
@@ -44,42 +45,15 @@ class FeedCreateSchema(BaseModel):
         return value
 
 
-class DummySchema1(BaseModel):
-    feed_body: Optional[str] = None
-
-    @field_validator("feed_body")
-    def validate_body(cls, value: Optional[str]) -> None:
-        if value is None:
-            raise ValueError("body is required.")
-        if len(value) > 200:
-            raise ValueError("body is exceeded max 200 character limit.")
-
-
-class DummySchema(BaseModel):
-    feed_body: Optional[str] = None
-    scheduled_time: Optional[datetime] = None
-    tags: Optional[list[UUID]] = None
-    category: Optional[UUID] = None
-    remove_image_targets: Optional[list[str]] = None
-    remove_video_target: Optional[str] = None
-
-    @field_validator("feed_body")
-    def validate_body(cls, value: Optional[str]) -> None:
-        if value is None:
-            raise ValueError("body is required.")
-        if len(value) > 200:
-            raise ValueError("body is exceeded max 200 character limit.")
-
-
 class AuthorSchema(BaseModel):
     id: UUID
-    first_name: Optional[str]
-    last_name: Optional[str]
+    name: Optional[str]
     username: str
     avatar_url: Optional[str]
 
     class Config:
         from_attributes = True
+        json_encoders = {UUID: lambda v: v.hex, datetime: lambda v: v.timestamp() if v is not None else None}
 
 
 class CategorySchema(BaseModel):
@@ -96,19 +70,45 @@ class TagSchema(BaseModel):
         from_attributes = True
 
 
-class FeedSchema(BaseModel):
+class FeedInSchema(BaseModel):
     id: UUID
     created_at: datetime
     updated_at: datetime
     author: AuthorSchema
     body: str
-    image_urls: Optional[list[str]]
-    video_url: Optional[str]
-    scheduled_time: Optional[datetime]
-    comment_mode: CommentMode
+    image_urls: Optional[list[str]] = []
+    video_url: Optional[str] = None
+    scheduled_time: Optional[datetime] = None
+    display_dislikes: bool = False
     feed_visibility: FeedVisibility
+    comment_policy: CommentPolicy
     tags: list[TagSchema] = []
-    category: Optional[CategorySchema]
+    category: Optional[CategorySchema] = None
+
+    class Config:
+        from_attributes = True
+        json_encoders = {UUID: lambda v: v.hex, datetime: lambda v: v.timestamp() if v is not None else None}
+
+
+class FeedOutSchema(FeedInSchema):
+    likes: Optional[int] = None
+    dislikes: Optional[int] = None
+    comments: Optional[int] = None
+    views: Optional[int] = None
+    is_reposted: Optional[bool] = None
+    is_quoted: Optional[bool] = None
+    is_liked: Optional[bool] = None
+    is_viewed: Optional[bool] = None
+    is_bookmarked: Optional[bool] = None
+
+    class Config:
+        from_attributes = True
+        json_encoders = {UUID: lambda v: v.hex, datetime: lambda v: v.timestamp() if v is not None else None}
+
+
+class FeedResponseSchema(BaseModel):
+    feeds: list[FeedOutSchema]
+    end: int
 
     class Config:
         from_attributes = True

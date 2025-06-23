@@ -4,6 +4,7 @@ from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel, field_validator
+
 from settings.my_exceptions import ValidationException
 from utility.my_enums import FollowPolicy, UserRole, UserStatus
 from utility.validators import validate_email, validate_length, validate_password, validate_phone_number, validate_username, violent_words_regex
@@ -97,7 +98,6 @@ class ProfileSchema(BaseModel):
     name: Optional[str] = None
     username: str
     email: str
-    phone_number: Optional[str] = None
     password: str
     avatar_url: Optional[str] = None
     banner_url: Optional[str] = None
@@ -190,9 +190,14 @@ class ForgotPasswordTokenSchema(BaseModel):
     forgot_password_token_expiration_date: str
 
 
-class TokenResponseSchema(BaseModel):
+class TokenSchema(BaseModel):
     access_token: Optional[str] = None
     refresh_token: Optional[str] = None
+
+
+class ProfileTokenSchema(BaseModel):
+    user: ProfileSchema
+    tokens: TokenSchema
 
 
 class ResultSchema(BaseModel):

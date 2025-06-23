@@ -2,19 +2,20 @@ from typing import Annotated, Optional
 from uuid import UUID
 
 import aiofiles
-from apps.feeds_app.models import CategoryModel, EngagementType, FeedModel, TagModel
-from apps.feeds_app.schemas import FeedCreateSchema, FeedSchema
+from fastapi import APIRouter, Form, HTTPException, UploadFile, status
+from ffmpeg.asyncio import FFmpeg
+from sqlalchemy import Result, select
+
+from apps.feeds_app.models import CategoryModel, InteractionType, FeedModel, TagModel
+from apps.feeds_app.schemas import FeedCreateSchema, FeedInSchema, FeedResponseSchema
 from apps.feeds_app.tasks import notify_followers_task
 from apps.users_app.schemas import ResultSchema
-from fastapi import APIRouter, BackgroundTasks, Form, HTTPException, UploadFile, status
-from ffmpeg.asyncio import FFmpeg
 from settings.my_config import get_settings
 from settings.my_database import DBSession
 from settings.my_dependency import JWTCredential, jwtDependency
 from settings.my_exceptions import NotFoundException, ValidationException
 from settings.my_minio import put_file_to_minio, put_object_to_minio, remove_objects_from_minio
 from settings.my_redis import cache_manager
-from sqlalchemy import Result, select
 from utility.my_logger import my_logger
 from utility.validators import allowed_image_extension, allowed_video_extension, get_file_extension, get_video_duration_using_ffprobe
 
@@ -23,17 +24,8 @@ feed_router = APIRouter()
 settings = get_settings()
 
 
-@feed_router.post(path="/test")
-async def test_route():
-    try:
-        return {"status": "ok"}
-    except Exception as e:
-        my_logger.error(f"Exception e: {e}")
-        return None
-
-
 @feed_router.post(path="/create", status_code=201)
-async def create_feed_route(jwt: jwtDependency, session: DBSession, bgt: BackgroundTasks, schema: FeedCreateSchema):
+async def create_feed_route(jwt: jwtDependency, schema: FeedCreateSchema, session: DBSession):
     try:
         # 1. Validate category existence
         if schema.category:
@@ -60,9 +52,9 @@ async def create_feed_route(jwt: jwtDependency, session: DBSession, bgt: Backgro
         await session.commit()
         await session.refresh(instance=feed, attribute_names=["author", "tags", "category"])
 
-        feed_schema = FeedSchema.model_validate(obj=feed)
+        feed_schema = FeedInSchema.model_validate(obj=feed)
 
-        bgt.add_task(notify_followers_task, user_id=jwt.user_id.hex)
+        await notify_followers_task.kiq(user_id=jwt.user_id.hex)
 
         mapping = feed_schema.model_dump(exclude_unset=True, exclude_defaults=True, exclude_none=True, mode="json")
         my_logger.debug(f"mapping: {mapping}")
@@ -76,12 +68,12 @@ async def create_feed_route(jwt: jwtDependency, session: DBSession, bgt: Backgro
 
 @feed_router.patch(path="/update", status_code=200)
 async def update_feed_route(
-    _: jwtDependency,
-    session: DBSession,
-    feed_id: UUID,
-    body: Annotated[Optional[str], Form()] = None,
-    remove_image_targets: Annotated[Optional[list[str]], Form()] = None,
-    remove_video_target: Annotated[Optional[str], Form()] = None,
+        _: jwtDependency,
+        session: DBSession,
+        feed_id: UUID,
+        body: Annotated[Optional[str], Form()] = None,
+        remove_image_targets: Annotated[Optional[list[str]], Form()] = None,
+        remove_video_target: Annotated[Optional[str], Form()] = None,
 ):
     try:
         my_logger.debug(f"body: {body}")
@@ -95,8 +87,9 @@ async def update_feed_route(
             raise NotFoundException(detail="feed not found")
 
         if body is not None:
-            feed.body = body
-            await cache_manager.update_feed(feed_id=feed_id.hex, key="body", value=body)
+            if feed.body != body:
+                feed.body = body
+                await cache_manager.update_feed(feed_id=feed_id.hex, key="body", value=body)
 
         if remove_image_targets and feed.image_urls:
             for target in remove_image_targets:
@@ -126,11 +119,12 @@ async def update_feed_media_route(jwt: jwtDependency, session: DBSession, feed_i
             raise NotFoundException(detail="feed not found")
 
         if image_files:
-            my_logger.debug(f"image_files[0].filename: {image_files[0].filename}")
+            my_logger.debug(f"image_files: {image_files}")
             urls = await validate_and_save_images(jwt=jwt, image_files=image_files)
-            feed.image_urls = urls
+            my_logger.debug(f"urls: {urls}")
             if urls:
-                await cache_manager.update_feed(feed_id=feed_id.hex, key="image_urls", value=feed.image_urls)
+                # feed.image_urls = urls
+                await cache_manager.update_feed(feed_id=feed_id.hex, key="image_urls", value=urls)
 
         if video_file:
             my_logger.debug(f"video_file.filename: {video_file.filename}")
@@ -160,94 +154,64 @@ async def delete_feed_route(jwt: jwtDependency, session: DBSession, feed_id: UUI
     await cache_manager.delete_feed(author_id=jwt.user_id.hex, feed_id=feed_id.hex)
 
 
-@feed_router.get(path="/timeline/home", status_code=status.HTTP_200_OK)
+@feed_router.get(path="/timeline/home", response_model=list[FeedResponseSchema], response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
 async def get_home_timeline(jwt: jwtDependency, start: int = 0, end: int = 10):
     try:
-        return await cache_manager.get_home_timeline(user_id=jwt.user_id.hex, start=start, end=end)
+        feeds = await cache_manager.get_following_timeline(user_id=jwt.user_id.hex, start=start, end=end)
+        return feeds
     except Exception as e:
         my_logger.critical(f"Exception in get_home_timeline_route: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Exception in get_home_timeline_route: {e}")
 
 
-@feed_router.get(path="/timeline/global", status_code=status.HTTP_200_OK)
+@feed_router.get(path="/timeline/global", response_model=list[FeedResponseSchema], response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
 async def get_global_timeline_route(jwt: jwtDependency, start: int = 0, end: int = 10):
     try:
-        return await cache_manager.get_global_timeline(user_id=jwt.user_id.hex, start=start, end=end)
-    except ValueError as e:
-        print(f"ValueError in get_global_timeline: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{e}")
+        feeds = await cache_manager.get_discover_timeline(user_id=jwt.user_id.hex, start=start, end=end)
+        return feeds
     except Exception as e:
         print(f"Exception in get_global_timeline: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Exception in get_global_timeline: {e}")
 
 
-@feed_router.post(path="/interaction/add", status_code=status.HTTP_200_OK)
-async def feed_track_add(feed_id: str, action: EngagementType, jwt: jwtDependency):
-    try:
-        user_id = jwt.user_id.hex
-
-        # Always add the requested action first
-        await cache_manager.set_user_engagement(user_id=user_id, feed_id=feed_id, action=action)
-
-        # Enforce mutual exclusion between LIKE and DISLIKE
-        if action == EngagementType.like:
-            await cache_manager.remove_user_engagement(user_id=user_id, feed_id=feed_id, action=EngagementType.dislike)
-        elif action == EngagementType.dislike:
-            await cache_manager.remove_user_engagement(user_id=user_id, feed_id=feed_id, action=EngagementType.like)
-        my_logger.debug(f"feed_id: {feed_id}, action: {action.value}")
-        return {"status": "ok"}
-    except Exception as e:
-        print(f"Exception in feed_track_add: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Exception in feed_track_add: {e}")
-
-
-@feed_router.post(path="/interaction/remove", status_code=status.HTTP_200_OK)
-async def feed_track_remove(feed_id: str, action: EngagementType, jwt: jwtDependency):
-    try:
-        if action in [EngagementType.like, EngagementType.dislike]:
-            await cache_manager.remove_user_engagement(user_id=jwt.user_id.hex, feed_id=feed_id, action=action)
-        my_logger.debug(f"feed_id: {feed_id}, action: {action.value}")
-        return {"status": "ok"}
-    except Exception as e:
-        print(f"Exception in feed_track_remove: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Exception in feed_track_remove: {e}")
-
-
-@feed_router.post(path="/comments/{comment_id}/reaction", status_code=status.HTTP_200_OK)
-async def track_feed_comment_view_route(comment_id: str, jwt: jwtDependency):
-    try:
-        # await cache_manager.mark(user_id=jwt.user_id.hex, comment_id=comment_id)
-        return {"status": "comment view tracked"}
-    except Exception as e:
-        print(f"Exception in track_feed_comment_view_route: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Exception in track_feed_comment_view_route: {e}")
-
-
-@feed_router.post(path="/comments{comment_id}/reaction", status_code=status.HTTP_200_OK)
-async def track_feed_comment_reaction_route(comment_id: str, reaction: EngagementType, jwt: jwtDependency):
-    try:
-        # await cache_manager.track_user_reaction_to_comment(user_id=jwt.user_id.hex, comment_id=comment_id, reaction=reaction)
-        return {"status": "comment reaction tracked"}
-    except Exception as e:
-        print(f"Exception in track_feed_comment_view_route: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Exception in track_feed_comment_view_route: {e}")
-
-
-@feed_router.get(path="/user_timeline", status_code=status.HTTP_200_OK)
+@feed_router.get(path="/timeline/user", response_model=list[FeedResponseSchema], response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
 async def user_timeline(jwt: jwtDependency, start: int = 0, end: int = 19):
     try:
-        user_timeline_feeds: list[dict] = await cache_manager.get_user_timeline(user_id=jwt.user_id.hex, start=start, end=end)
-
-        if not user_timeline_feeds:
-            return []
-
-        return user_timeline_feeds
-    except ValueError as e:
-        my_logger.debug(f"ValueError in create_feed_route: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{e}")
+        feeds = await cache_manager.get_user_timeline(user_id=jwt.user_id.hex, start=start, end=end)
+        return feeds
     except Exception as e:
         my_logger.debug(f"Exception in user_timeline route: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Server error occurred while creating feed.")
+
+
+@feed_router.post(path="/interaction/set", response_model=ResultSchema, status_code=200)
+async def set_feed_interaction(jwt: jwtDependency, feed_id: str, interaction_type: InteractionType):
+    user_id = jwt.user_id.hex
+
+    await cache_manager.set_feed_interaction(user_id=user_id, feed_id=feed_id, interaction_type=interaction_type)
+
+    if interaction_type == InteractionType.likes:
+        await cache_manager.remove_feed_interaction(user_id=user_id, feed_id=feed_id, interaction_type=InteractionType.dislikes)
+    elif interaction_type == InteractionType.dislikes:
+        await cache_manager.remove_feed_interaction(user_id=user_id, feed_id=feed_id, interaction_type=InteractionType.likes)
+
+    return {"ok": True}
+
+
+@feed_router.post(path="/interaction/remove", response_model=ResultSchema, status_code=200)
+async def remove_feed_interaction(jwt: jwtDependency, feed_id: str, interaction_type: InteractionType):
+    await cache_manager.remove_feed_interaction(user_id=jwt.user_id.hex, feed_id=feed_id, interaction_type=interaction_type)
+    return {"ok": True}
+
+
+@feed_router.post(path="/comments/interaction/set", status_code=200)
+async def track_feed_comment_view_route(jwt: jwtDependency, comment_id: str):
+    return {"ok": True}
+
+
+@feed_router.post(path="/comments/interaction/remove", status_code=200)
+async def track_feed_comment_reaction_route(jwt: jwtDependency, comment_id: str, reaction: InteractionType):
+    return {"ok": True}
 
 
 @feed_router.get(path="/search", status_code=status.HTTP_200_OK)
@@ -287,7 +251,7 @@ async def validate_and_save_images(jwt: JWTCredential, image_files: list[UploadF
         if ext not in allowed_image_extension:
             raise ValidationException(detail="Only PNG, JPG, and JPEG formats are allowed for feed images")
         content = await image_file.read()
-        if len(content) > 2 * 1024 * 1024:
+        if len(content) > 4 * 1024 * 1024:
             raise ValidationException(detail="Feed image size exceeded limit 2MB.")
         url = await put_object_to_minio(object_name=f"users/{jwt.user_id.hex}/post_images/{image_file.filename}", data=content)
         validated_image_urls.append(url)

@@ -1,92 +1,99 @@
-from enum import Enum
+from enum import Enum, auto
 from typing import TypedDict
 
 
-class UserRole(str, Enum):
-    ADMIN = "admin"
-    REGULAR = "regular"
+class AutoName(Enum):
+    @staticmethod
+    def _generate_next_value_(name, start, count, last_values):
+        return name
 
 
-class UserStatus(str, Enum):
-    active = "active"
-    inactive = "inactive"
+class UserRole(AutoName):
+    admin = auto()
+    regular = auto()
 
 
-class EngagementType(str, Enum):
-    like = "likes"
-    dislike = "dislikes"
-    view = "views"
-    refeed = "refeed"
-    quote = "quote"
+class UserStatus(AutoName):
+    active = auto()
+    inactive = auto()
 
 
-class EngagementStatus(TypedDict):
-    is_liked: bool
-    is_disliked: bool
-    is_viewed: bool
-    is_refeeded: bool
+class InteractionType(AutoName):
+    reposts = auto()
+    quotes = auto()
+    likes = auto()
+    views = auto()
+    bookmarks = auto()
+
+
+class InteractionStatus(TypedDict):
+    is_reposted: bool
     is_quoted: bool
+    is_liked: bool
+    is_viewed: bool
+    is_bookmarked: bool
 
 
-class FeedVisibility(str, Enum):
-    public = "public"
-    followers = "followers"
-    private = "private"
-    archived = "archived"
+class FeedVisibility(AutoName):
+    public = auto()
+    followers = auto()
+    private = auto()
+    archived = auto()
 
 
-class FollowPolicy(str, Enum):
-    auto_accept = "autoAccept"
-    manual_approval = "manualApproval"
+class FollowPolicy(Enum):
+    @staticmethod
+    def _generate_next_value_(name, start, count, last_values):
+        # Converts snake_case to camelCase
+        parts = name.split("_")
+        return parts[0] + parts[1].capitalize()
+
+    auto_accept = auto()
+    manual_approval = auto()
 
 
-class FollowStatus(str, Enum):
-    pending = "pending"
-    accepted = "accepted"
-    declined = "declined"
+class FollowStatus(AutoName):
+    pending = auto()
+    accepted = auto()
+    declined = auto()
 
 
-class ReportReason(str, Enum):
-    intellectual_property = "intellectual_property"
-    spam = "spam"
-    inappropriate = "inappropriate"
-    misinformation = "misinformation"
-    harassment = "harassment"
-    hate_speech = "hateSpeech"
-    violence = "violence"
-    other = "other"
+class ReportReason(AutoName):
+    copyright_infringement = auto()
+    spam = auto()
+    nudity_or_sexual_content = auto()
+    misinformation = auto()
+    harassment_or_bullying = auto()
+    hate_speech = auto()
+    violence_or_threats = auto()
+    self_harm_or_suicide = auto()
+    impersonation = auto()
+    other = auto()
 
 
-class ProcessStatus(str, Enum):
-    pending = "pending"
-    processed = "processed"
-    failed = "failed"
+class ProcessStatus(AutoName):
+    pending = auto()
+    processed = auto()
+    failed = auto()
 
 
-class CommentMode(str, Enum):
-    everyone = "everyone"
-    followers = "followers"
-    mentioned = "mentioned"
-    none = "none"
+class CommentPolicy(AutoName):
+    everyone = auto()
+    followers = auto()
 
 
-class PubSubTopics(str, Enum):
+class PubSubTopics(AutoName):
     HOME_TIMELINE = "users:{follower_id}:home_timeline"
     SETTINGS_STATS = "settings:stats"
 
 
-class ScreenState(str, Enum):
-    home = "home"
-    room = "room"
+class GroupType(AutoName):
+    public = auto()
+    private = auto()
 
 
-class GroupType(str, Enum):
-    public = "public"
-    private = "private"
-
-
-class MemberType(str, Enum):
-    owner = "owner"
-    administrator = "administrator"
-    moderator = "moderator"
-    regular = "regular"
+class MemberType(Enum):
+    owner = auto()
+    administrator = auto()
+    moderator = auto()
+    regular = auto()

@@ -73,6 +73,7 @@ python-version = "3.13"
 
 [dependency-groups]
 dev = [
+    "alembic",
     "basedpyright",
     "black",
     "ipython",

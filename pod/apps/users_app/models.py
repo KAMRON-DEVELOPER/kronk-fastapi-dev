@@ -2,10 +2,11 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID, uuid4
 
+from sqlalchemy import DateTime, Enum, ForeignKey, String, UniqueConstraint, func, select, text
 from sqlalchemy import TIMESTAMP
 from sqlalchemy import UUID as PG_UUID
-from sqlalchemy import DateTime, Enum, ForeignKey, String, UniqueConstraint, func, select, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, column_property, mapped_column, relationship
+
 from utility.my_enums import FollowPolicy, FollowStatus, UserRole, UserStatus
 
 if TYPE_CHECKING:
@@ -50,7 +51,7 @@ class FollowModel(BaseModel):
 class UserModel(BaseModel):
     __tablename__ = "user_table"
 
-    name: Mapped[Optional[str]] = mapped_column(String(length=50), nullable=True)
+    name: Mapped[str] = mapped_column(String(length=50), nullable=True)
     username: Mapped[str] = mapped_column(String(length=50), index=True)
     email: Mapped[str] = mapped_column(String(length=50), index=True)
     phone_number: Mapped[Optional[str]] = mapped_column(String(length=50), nullable=True)
@@ -62,7 +63,7 @@ class UserModel(BaseModel):
     bio: Mapped[Optional[str]] = mapped_column(String(length=50), nullable=True)
     country: Mapped[Optional[str]] = mapped_column(String(length=50), nullable=True)
     city: Mapped[Optional[str]] = mapped_column(String(length=50), nullable=True)
-    role: Mapped[UserRole] = mapped_column(Enum(UserRole, name="user_role"), default=UserRole.REGULAR)
+    role: Mapped[UserRole] = mapped_column(Enum(UserRole, name="user_role"), default=UserRole.regular)
     status: Mapped[UserStatus] = mapped_column(Enum(UserStatus, name="user_status"), default=UserStatus.active)
     follow_policy: Mapped[FollowPolicy] = mapped_column(Enum(FollowPolicy, name="follow_policy"), default=FollowPolicy.auto_accept)
 

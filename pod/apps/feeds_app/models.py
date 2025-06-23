@@ -1,10 +1,11 @@
 from datetime import datetime
 from typing import Optional
 
+from sqlalchemy import ARRAY, TIMESTAMP, UUID, Enum, ForeignKey, String, UniqueConstraint, Boolean
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from apps.users_app.models import BaseModel, UserModel
-from sqlalchemy import ARRAY, TIMESTAMP, UUID, Enum, ForeignKey, String, UniqueConstraint, func, select
-from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship
-from utility.my_enums import CommentMode, EngagementType, FeedVisibility, ReportReason
+from utility.my_enums import InteractionType, FeedVisibility, ReportReason, CommentPolicy
 
 
 class CategoryModel(BaseModel):
@@ -41,11 +42,11 @@ class FeedModel(BaseModel):
     image_urls: Mapped[Optional[list]] = mapped_column(ARRAY(item_type=String, dimensions=4), nullable=True)
     video_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     scheduled_time: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, nullable=True)
-    comment_mode: Mapped[CommentMode] = mapped_column(Enum(CommentMode, name="comment_model"), default=CommentMode.everyone)
+    display_dislikes: Mapped[bool] = mapped_column(Boolean(), default=False)
+    comment_policy: Mapped[CommentPolicy] = mapped_column(Enum(CommentPolicy, name="comment_policy"), default=CommentPolicy.everyone)
     feed_visibility: Mapped[FeedVisibility] = mapped_column(Enum(FeedVisibility, name="feed_visibility"), default=FeedVisibility.public)
     category_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("category_table.id"))
     quoted_feed_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("feed_table.id"))
-    author_username: Mapped[str] = column_property(select(UserModel.username).where(UserModel.id == author_id).correlate_except(UserModel).scalar_subquery())
     author: Mapped["UserModel"] = relationship(argument="UserModel", back_populates="feeds")
     category: Mapped[Optional["CategoryModel"]] = relationship(argument="CategoryModel", back_populates="categories")
     feed_comments: Mapped[list["FeedCommentModel"]] = relationship(argument="FeedCommentModel", back_populates="feed")
@@ -58,6 +59,8 @@ class FeedModel(BaseModel):
     quotes: Mapped[list["FeedModel"]] = relationship(back_populates="quoted_feed", cascade="all, delete-orphan")
     tag_links: Mapped[list["FeedTagLink"]] = relationship(back_populates="feed", overlaps="feeds, tags", cascade="all, delete-orphan")
     tags: Mapped[list["TagModel"]] = relationship(secondary="feed_tag_link_table", back_populates="feeds", overlaps="feed_links,feed,tag")
+
+    # author_username: Mapped[str] = column_property(select(UserModel.username).where(UserModel.id == author_id).correlate_except(UserModel).scalar_subquery())
 
     def __repr__(self):
         return "FeedModel"
@@ -95,7 +98,7 @@ class FeedEngagementModel(BaseModel):
     __table_args__ = (UniqueConstraint("user_id", "feed_id", name="uq_feed_engagement"),)
     user_id: Mapped[UUID] = mapped_column(ForeignKey("user_table.id"))
     feed_id: Mapped[UUID] = mapped_column(ForeignKey("feed_table.id"))
-    engagement_type: Mapped[EngagementType] = mapped_column(Enum(EngagementType, name="engagement_type"), nullable=False)
+    engagement_type: Mapped[InteractionType] = mapped_column(Enum(InteractionType, name="engagement_type"), nullable=False)
     user: Mapped["UserModel"] = relationship(argument="UserModel", back_populates="feed_engagements")
     feed: Mapped["FeedModel"] = relationship(argument="FeedModel", back_populates="feed_engagements")
 
@@ -108,7 +111,7 @@ class FeedCommentEngagementModel(BaseModel):
     __table_args__ = (UniqueConstraint("user_id", "feed_comment_id", name="uq_feed_comment_engagement"),)
     user_id: Mapped[UUID] = mapped_column(ForeignKey("user_table.id"))
     feed_comment_id: Mapped[UUID] = mapped_column(ForeignKey("feed_comment_table.id"))
-    engagement_type: Mapped[EngagementType] = mapped_column(Enum(EngagementType, name="engagement_type"), nullable=False)
+    engagement_type: Mapped[InteractionType] = mapped_column(Enum(InteractionType, name="engagement_type"), nullable=False)
     user: Mapped["UserModel"] = relationship(argument="UserModel", back_populates="feed_comment_engagements")
     feed_comment: Mapped["FeedCommentModel"] = relationship(argument="FeedCommentModel", back_populates="feed_comment_engagements")
 

@@ -1,7 +1,11 @@
-from functools import partial
 from random import randint
 from typing import Optional
 from uuid import UUID
+
+from bcrypt import checkpw, gensalt, hashpw
+from fastapi import APIRouter, HTTPException, UploadFile, status
+from firebase_admin.auth import UserRecord
+from sqlalchemy import select
 
 from apps.users_app.models import UserModel
 from apps.users_app.schemas import (
@@ -14,20 +18,16 @@ from apps.users_app.schemas import (
     RequestForgotPasswordSchema,
     ResetPasswordSchema,
     ResultSchema,
-    TokenResponseSchema,
-    VerifySchema,
+    TokenSchema,
+    VerifySchema, ProfileTokenSchema,
 )
 from apps.users_app.tasks import add_follow_to_db, delete_follow_from_db, notify_settings_stats, send_email_task
-from bcrypt import checkpw, gensalt, hashpw
-from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, status
-from firebase_admin.auth import UserRecord
 from services.firebase_service import validate_firebase_token
 from settings.my_database import DBSession
 from settings.my_dependency import create_jwt_token, headerTokenDependency, jwtDependency
 from settings.my_exceptions import AlreadyExistException, HeaderTokenException, NotFoundException, ValidationException
 from settings.my_minio import put_object_to_minio, remove_objects_from_minio, wipe_objects_from_minio
 from settings.my_redis import cache_manager
-from sqlalchemy import select
 from utility.my_logger import my_logger
 from utility.utility import generate_avatar_url, generate_password_string, generate_unique_username
 from utility.validators import allowed_image_extension, get_file_extension, get_image_dimensions
@@ -36,7 +36,7 @@ users_router = APIRouter()
 
 
 @users_router.post(path="/auth/register", response_model=RegistrationTokenSchema, status_code=201)
-async def register_route(schema: RegisterSchema, htd: headerTokenDependency, bt: BackgroundTasks) -> dict[str, str]:
+async def register_route(schema: RegisterSchema, htd: headerTokenDependency) -> dict[str, str]:
     if htd.verify_token is not None:
         if await cache_manager.exists(name=f"tokens:registration:{htd.verify_token}"):
             raise HeaderTokenException(detail="Check your email! Your verification token is on its way.")
@@ -57,13 +57,13 @@ async def register_route(schema: RegisterSchema, htd: headerTokenDependency, bt:
     mapping = {**schema.model_dump(), "code": code}
     verify_token, verify_token_expiration_date = await cache_manager.set_registration_credentials(mapping=mapping)
 
-    bt.add_task(partial(send_email_task, to_email=schema.email, username=schema.username, code=code))
+    await send_email_task.kiq(to_email=schema.email, username=schema.name, code=code)
 
     return {"verify_token": verify_token, "verify_token_expiration_date": verify_token_expiration_date}
 
 
-@users_router.post(path="/auth/verify", response_model=TokenResponseSchema, status_code=200)
-async def verify_route(htd: headerTokenDependency, schema: VerifySchema, bt: BackgroundTasks, session: DBSession):
+@users_router.post(path="/auth/verify", response_model=ProfileTokenSchema, status_code=200)
+async def verify_route(htd: headerTokenDependency, schema: VerifySchema, session: DBSession):
     if htd.verify_token is None:
         raise HeaderTokenException(detail="Your verification token is missing.")
 
@@ -74,23 +74,23 @@ async def verify_route(htd: headerTokenDependency, schema: VerifySchema, bt: Bac
     if schema.code != cache.get("code"):
         raise ValidationException(detail="Your verification code is incorrect.")
 
-    user = UserModel(username=cache.get("username"), email=cache.get("email"), password=hashpw(password=cache.get("password", "").encode(), salt=gensalt(rounds=8)).decode())
+    user = UserModel(name=cache.get("name"), username=cache.get("username"), email=cache.get("email"),
+                     password=hashpw(password=cache.get("password", "").encode(), salt=gensalt(rounds=8)).decode())
     session.add(instance=user)
     await session.commit()
     await session.refresh(instance=user)
 
-    await cache_profile(user=user)
-
     await cache_manager.remove_registration_credentials(verify_token=htd.verify_token)
 
     await cache_manager.incr_statistics()
-    bt.add_task(notify_settings_stats)
-    bt.add_task(partial(send_email_task, to_email=cache.get("email", ""), username=cache.get("username", ""), for_thanks_signing_up=True))
 
-    return generate_token(user_id=user.id.hex)
+    await notify_settings_stats.kiq()
+    await send_email_task.kiq(to_email=cache.get("email", ""), username=cache.get("username", ""), for_thanks_signing_up=True)
+
+    return await cache_profile(user=user)
 
 
-@users_router.post(path="/auth/login", response_model=TokenResponseSchema, status_code=200)
+@users_router.post(path="/auth/login", response_model=ProfileTokenSchema, status_code=200)
 async def login_route(schema: LoginSchema, session: DBSession):
     # 1. Try from cache
     search_results = await cache_manager.search_user_by_username(username_query=schema.username, limit=1)
@@ -116,9 +116,7 @@ async def login_route(schema: LoginSchema, session: DBSession):
     if not checkpw(schema.password.encode(), user.password.encode()):
         raise ValidationException("password is not match.")
 
-    await cache_profile(user=user)
-
-    return generate_token(user_id=user.id.hex)
+    return await cache_profile(user=user)
 
 
 @users_router.post(path="/auth/logout", response_model=ResultSchema, status_code=200)
@@ -130,7 +128,7 @@ async def logout_route(jwt: jwtDependency, session: DBSession):
 
 
 @users_router.post(path="/auth/request-forgot-password", response_model=ForgotPasswordTokenSchema, status_code=status.HTTP_200_OK)
-async def request_forgot_password_route(schema: RequestForgotPasswordSchema, bt: BackgroundTasks, session: DBSession):
+async def request_forgot_password_route(schema: RequestForgotPasswordSchema, session: DBSession):
     stmt = select(UserModel).where(UserModel.email == schema.email)
     result = await session.execute(stmt)
     user: Optional[UserModel] = result.scalar_one_or_none()
@@ -141,12 +139,12 @@ async def request_forgot_password_route(schema: RequestForgotPasswordSchema, bt:
     code: str = "".join([str(randint(a=0, b=9)) for _ in range(4)])
     forgot_password_token, forgot_password_token_expiration_date = await cache_manager.set_forgot_password_credentials(mapping={"email": schema.email, "code": code})
 
-    bt.add_task(partial(send_email_task, to_email=schema.email, username=user.username, for_forgot_password=True, code=code))
+    await send_email_task.kiq(to_email=schema.email, username=user.username, for_forgot_password=True, code=code)
 
     return {"forgot_password_token": forgot_password_token, "forgot_password_token_expiration_date": forgot_password_token_expiration_date}
 
 
-@users_router.post(path="/auth/forgot-password", status_code=status.HTTP_200_OK)
+@users_router.post(path="/auth/forgot-password", response_model=ProfileTokenSchema, status_code=status.HTTP_200_OK)
 async def forgot_password_route(schema: ResetPasswordSchema, htd: headerTokenDependency, session: DBSession):
     if not htd.forgot_password_token:
         raise HeaderTokenException(detail="Reset password token is missing in the headers.")
@@ -174,15 +172,13 @@ async def forgot_password_route(schema: ResetPasswordSchema, htd: headerTokenDep
     await session.commit()
     await session.refresh(instance=user)
 
-    await cache_profile(user=user)
-
     await cache_manager.remove_forgot_password_credentials(forgot_password_token=htd.forgot_password_token)
 
-    return generate_token(user_id=user.id.hex)
+    return await cache_profile(user=user)
 
 
-@users_router.post(path="/auth/social/google", response_model=TokenResponseSchema, status_code=200)
-async def google_auth_route(htd: headerTokenDependency, bgt: BackgroundTasks, session: DBSession):
+@users_router.post(path="/auth/social/google", response_model=ProfileTokenSchema, status_code=200)
+async def google_auth_route(htd: headerTokenDependency, session: DBSession):
     if not htd.firebase_id_token:
         raise HeaderTokenException("Firebase ID token is missing in the headers.")
 
@@ -211,13 +207,11 @@ async def google_auth_route(htd: headerTokenDependency, bgt: BackgroundTasks, se
             await session.commit()
             await session.refresh(instance=new_user)
 
-    await cache_profile(user=new_user)
-
     await cache_manager.incr_statistics()
-    bgt.add_task(notify_settings_stats)
-    bgt.add_task(partial(send_email_task, to_email=new_user.email, username=new_user.username, for_thanks_signing_up=True))
+    await notify_settings_stats.kiq()
+    await send_email_task.kiq(to_email=new_user.email, username=new_user.username, for_thanks_signing_up=True)
 
-    return generate_token(user_id=new_user.id.hex)
+    return await cache_profile(user=new_user)
 
 
 @users_router.get(path="/profile", response_model=ProfileSchema, response_model_exclude_none=True, status_code=200)
@@ -280,7 +274,7 @@ async def update_profile_route(jwt: jwtDependency, session: DBSession, schema: P
 
 @users_router.patch(path="/profile/update/media", response_model=ResultSchema, status_code=200)
 async def update_profile_media(
-    jwt: jwtDependency, session: DBSession, remove_target: Optional[str] = None, avatar_file: Optional[UploadFile] = None, banner_file: Optional[UploadFile] = None
+        jwt: jwtDependency, session: DBSession, remove_target: Optional[str] = None, avatar_file: Optional[UploadFile] = None, banner_file: Optional[UploadFile] = None
 ):
     try:
         if (user := await session.get(UserModel, jwt.user_id)) is None:
@@ -382,22 +376,25 @@ async def user_search(jwt: jwtDependency, query: str, offset: int = 0, limit: in
 
 
 @users_router.post(path="/follow", response_model=ResultSchema, status_code=200)
-async def follow_route(jwt: jwtDependency, following_id: UUID, session: DBSession, bgt: BackgroundTasks):
+async def follow_route(jwt: jwtDependency, following_id: UUID):
     if jwt.user_id == following_id:
         raise ValidationException(detail="Are you piece of human shit! Cannot follow yourself")
 
     await cache_manager.add_follower(user_id=jwt.user_id.hex, following_id=following_id.hex)
-    bgt.add_task(add_follow_to_db, user_id=jwt.user_id, following_id=following_id, session=session)
+
+    await add_follow_to_db.kiq(user_id=jwt.user_id, following_id=following_id)
+
     return {"ok": True}
 
 
 @users_router.post(path="/unfollow", response_model=ResultSchema, status_code=200)
-async def unfollow_route(jwt: jwtDependency, following_id: UUID, session: DBSession, bgt: BackgroundTasks):
+async def unfollow_route(jwt: jwtDependency, following_id: UUID):
     if jwt.user_id == following_id:
         raise ValidationException(detail="Are you piece of human shit! Cannot follow yourself")
 
     await cache_manager.remove_follower(user_id=jwt.user_id.hex, following_id=following_id.hex)
-    bgt.add_task(delete_follow_from_db, user_id=jwt.user_id, following_id=following_id, session=session)
+
+    await delete_follow_from_db.kiq(user_id=jwt.user_id, following_id=following_id)
     return {"ok": True}
 
 
@@ -411,13 +408,13 @@ async def get_followings_route(jwt: jwtDependency):
     return await cache_manager.get_following(user_id=jwt.user_id.hex)
 
 
-@users_router.post(path="/auth/access", response_model=TokenResponseSchema, status_code=status.HTTP_200_OK)
+@users_router.post(path="/auth/access", response_model=TokenSchema, status_code=status.HTTP_200_OK)
 async def refresh_access_token_route(jwt: jwtDependency):
     access_token: str = create_jwt_token(subject={"id": jwt.user_id.hex})
     return {"access_token": access_token}
 
 
-@users_router.post(path="/auth/refresh", response_model=TokenResponseSchema, status_code=status.HTTP_200_OK)
+@users_router.post(path="/auth/refresh", response_model=TokenSchema, status_code=status.HTTP_200_OK)
 async def refresh_refresh_token_route(jwt: jwtDependency):
     subject = {"id": jwt.user_id.hex}
     access_token = create_jwt_token(subject=subject)
@@ -439,4 +436,4 @@ async def cache_profile(user: UserModel) -> dict:
     my_logger.debug("profile caching to redis...")
     my_logger.debug(f"mapping: {mapping}")
 
-    return mapping
+    return {"user": mapping, "tokens": generate_token(user_id=user.id.hex)}
