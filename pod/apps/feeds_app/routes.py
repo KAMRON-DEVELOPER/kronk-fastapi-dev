@@ -2,17 +2,17 @@ from typing import Annotated, Optional
 from uuid import UUID
 
 import aiofiles
-from fastapi import APIRouter, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Form, HTTPException, UploadFile, status, File
 from ffmpeg.asyncio import FFmpeg
 from sqlalchemy import Result, select
 
 from apps.feeds_app.models import CategoryModel, EngagementType, FeedModel, TagModel
-from apps.feeds_app.schemas import FeedCreateSchema, FeedSchema, FeedResponseSchema
+from apps.feeds_app.schemas import FeedCreateSchema, FeedSchema, FeedResponseSchema, EngagementSchema, FeedCreateMediaSchema
 from apps.feeds_app.tasks import notify_followers_task
 from apps.users_app.schemas import ResultSchema
 from settings.my_config import get_settings
 from settings.my_database import DBSession
-from settings.my_dependency import JWTCredential, jwtDependency
+from settings.my_dependency import JWTCredential, strictJwtDependency, jwtDependency
 from settings.my_exceptions import NotFoundException, ValidationException
 from settings.my_minio import put_file_to_minio, put_object_to_minio, remove_objects_from_minio
 from settings.my_redis import cache_manager
@@ -25,27 +25,32 @@ settings = get_settings()
 
 
 @feed_router.post(path="/create", status_code=201)
-async def create_feed_route(jwt: jwtDependency, schema: FeedCreateSchema, session: DBSession):
+async def create_feed_route(jwt: strictJwtDependency, schm: Annotated[FeedCreateSchema, Form()], media: Annotated[FeedCreateMediaSchema, File()], session: DBSession):
     try:
+        if "a" == "a":
+            my_logger.debug(f"schm: {schm.body}")
+            my_logger.debug(f"media len: {len(media.image_files)}")
+            return {"feed_id": "I HATE YOU"}
+
         # 1. Validate category existence
-        if schema.category:
-            category_exists: Optional[CategoryModel] = await session.scalar(select(CategoryModel).where(CategoryModel.id == schema.category))
+        if schm.category_id:
+            category_exists: Optional[CategoryModel] = await session.scalar(select(CategoryModel).where(CategoryModel.id == schm.category_id))
             if not category_exists:
                 raise HTTPException(status_code=400, detail="Invalid category ID.")
 
         # 2. Validate tag UUIDs existence
-        if schema.tags:
-            tag_ids_in_db = await session.scalars(select(TagModel.id).where(TagModel.id.in_(schema.tags)))
+        if schm.tags:
+            tag_ids_in_db = await session.scalars(select(TagModel.id).where(TagModel.id.in_(schm.tags)))
             found_tag_ids = set(tag_ids_in_db.all())
-            missing_tags = set(schema.tags) - found_tag_ids
+            missing_tags = set(schm.tags) - found_tag_ids
             if missing_tags:
                 raise NotFoundException(detail=f"Tag(s) not found: {', '.join(str(tag) for tag in missing_tags)}")
 
-        feed = FeedModel(author_id=jwt.user_id, body=schema.body, scheduled_time=schema.scheduled_time, category_id=schema.category)
+        feed = FeedModel(author_id=jwt.user_id, body=schm.body, scheduled_at=schm.scheduled_at, category_id=schm.category_id)
 
         # 4. Add tags if any
-        if schema.tags:
-            tags = await session.scalars(select(TagModel).where(TagModel.id.in_(schema.tags)))
+        if schm.tags:
+            tags = await session.scalars(select(TagModel).where(TagModel.id.in_(schm.tags)))
             feed.tags.extend(tags.all())
 
         session.add(instance=feed)
@@ -63,12 +68,12 @@ async def create_feed_route(jwt: jwtDependency, schema: FeedCreateSchema, sessio
         return {"feed_id": feed.id}
     except Exception as e:
         my_logger.exception(f"Exception while creating feed, e: {e}")
-        return {"ok": False}
+        return {"feed_id": "I HATE YOU"}
 
 
 @feed_router.patch(path="/update", status_code=200)
 async def update_feed_route(
-        _: jwtDependency,
+        _: strictJwtDependency,
         session: DBSession,
         feed_id: UUID,
         body: Annotated[Optional[str], Form()] = None,
@@ -113,7 +118,8 @@ async def update_feed_route(
 
 
 @feed_router.patch(path="/update/media", response_model=ResultSchema, status_code=200)
-async def update_feed_media_route(jwt: jwtDependency, session: DBSession, feed_id: UUID, image_files: Optional[list[UploadFile]] = None, video_file: Optional[UploadFile] = None):
+async def update_feed_media_route(jwt: strictJwtDependency, session: DBSession, feed_id: UUID, image_files: Optional[list[UploadFile]] = None,
+                                  video_file: Optional[UploadFile] = None):
     try:
         if (feed := await session.get(FeedModel, feed_id)) is None:
             raise NotFoundException(detail="feed not found")
@@ -141,15 +147,16 @@ async def update_feed_media_route(jwt: jwtDependency, session: DBSession, feed_i
 
 
 @feed_router.delete(path="/delete", status_code=204)
-async def delete_feed_route(jwt: jwtDependency, session: DBSession, feed_id: UUID):
-    my_logger.debug(f"feed_id: {feed_id}")
-    if (instance := await session.get(FeedModel, feed_id)) is None:
+async def delete_feed_route(jwt: strictJwtDependency, feed_id: UUID, session: DBSession):
+    feed: Optional[FeedModel] = await session.get(FeedModel, feed_id)
+    if feed is None:
         raise NotFoundException(detail="feed not found")
-    if instance.video_url:
-        await remove_objects_from_minio(object_names=[instance.video_url])
-    if instance.image_urls:
-        await remove_objects_from_minio(object_names=instance.image_urls)
-    await session.delete(instance=instance)
+
+    if feed.video_url:
+        await remove_objects_from_minio(object_names=[feed.video_url])
+    if feed.image_urls:
+        await remove_objects_from_minio(object_names=feed.image_urls)
+    await session.delete(instance=feed)
     await session.commit()
     await cache_manager.delete_feed(author_id=jwt.user_id.hex, feed_id=feed_id.hex)
 
@@ -157,7 +164,7 @@ async def delete_feed_route(jwt: jwtDependency, session: DBSession, feed_id: UUI
 @feed_router.get(path="/timeline/discover", response_model=FeedResponseSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
 async def discover_timeline_route(jwt: jwtDependency, start: int = 0, end: int = 10):
     try:
-        feeds = await cache_manager.get_discover_timeline(user_id=jwt.user_id.hex, start=start, end=end)
+        feeds = await cache_manager.get_discover_timeline(user_id=jwt.user_id.hex if jwt is not None else None, start=start, end=end)
         my_logger.debug(f"feeds: {feeds}")
         return feeds
     except Exception as e:
@@ -166,7 +173,7 @@ async def discover_timeline_route(jwt: jwtDependency, start: int = 0, end: int =
 
 
 @feed_router.get(path="/timeline/following", response_model=FeedResponseSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
-async def following_timeline_route(jwt: jwtDependency, start: int = 0, end: int = 10):
+async def following_timeline_route(jwt: strictJwtDependency, start: int = 0, end: int = 10):
     try:
         feeds = await cache_manager.get_following_timeline(user_id=jwt.user_id.hex, start=start, end=end)
         my_logger.debug(f"feeds: {feeds}")
@@ -177,7 +184,7 @@ async def following_timeline_route(jwt: jwtDependency, start: int = 0, end: int 
 
 
 @feed_router.get(path="/timeline/user", response_model=FeedResponseSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
-async def user_timeline_route(jwt: jwtDependency, start: int = 0, end: int = 19):
+async def user_timeline_route(jwt: strictJwtDependency, start: int = 0, end: int = 19):
     try:
         feeds = await cache_manager.get_user_timeline(user_id=jwt.user_id.hex, start=start, end=end)
         my_logger.debug(f"feeds: {feeds}")
@@ -187,32 +194,22 @@ async def user_timeline_route(jwt: jwtDependency, start: int = 0, end: int = 19)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Server error occurred while creating feed.")
 
 
-@feed_router.post(path="/engagement/set", response_model=ResultSchema, status_code=200)
-async def set_feed_engagement(jwt: jwtDependency, feed_id: str, interaction_type: EngagementType):
-    await cache_manager.set_feed_engagement(user_id=jwt.user_id.hex, feed_id=feed_id, engagement_type=interaction_type)
-    return {"ok": True}
+@feed_router.post(path="/engagement/set", response_model=EngagementSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
+async def set_feed_engagement(jwt: strictJwtDependency, engagement_type: EngagementType, feed_id: Optional[UUID] = None, comment_id: Optional[UUID] = None):
+    engagement = await cache_manager.set_feed_engagement(user_id=jwt.user_id.hex, feed_id=feed_id.hex, comment_id=comment_id.hex, engagement_type=engagement_type)
+    my_logger.debug(f"engagement: {engagement}")
+    return engagement
 
 
-@feed_router.post(path="/engagement/remove", response_model=ResultSchema, status_code=200)
-async def remove_feed_engagement(jwt: jwtDependency, feed_id: str, interaction_type: EngagementType):
-    await cache_manager.remove_feed_engagement(user_id=jwt.user_id.hex, feed_id=feed_id, engagement_type=interaction_type)
-    return {"ok": True}
-
-
-@feed_router.post(path="/comment/engagement/set", status_code=200)
-async def set_comment_engagement(jwt: jwtDependency, comment_id: str, engagement_type: EngagementType):
-    await cache_manager.set_comment_engagement(user_id=jwt.user_id.hex, comment_id=comment_id, engagement_type=engagement_type)
-    return {"ok": True}
-
-
-@feed_router.post(path="/comment/engagement/remove", status_code=200)
-async def remove_comment_engagement(jwt: jwtDependency, comment_id: str, engagement_type: EngagementType):
-    await cache_manager.remove_comment_engagement(user_id=jwt.user_id.hex, comment_id=comment_id, engagement_type=engagement_type)
-    return {"ok": True}
+@feed_router.post(path="/engagement/remove", response_model=EngagementSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
+async def remove_feed_engagement(jwt: strictJwtDependency, engagement_type: EngagementType, feed_id: Optional[UUID] = None, comment_id: Optional[UUID] = None):
+    engagement = await cache_manager.remove_feed_engagement(user_id=jwt.user_id.hex, feed_id=feed_id.hex, comment_id=comment_id.hex, engagement_type=engagement_type)
+    my_logger.debug(f"engagement: {engagement}")
+    return engagement
 
 
 @feed_router.get(path="/search", status_code=status.HTTP_200_OK)
-async def feed_search(_: jwtDependency, query: str, offset: int = 0, limit: int = 50):
+async def feed_search(_: strictJwtDependency, query: str, offset: int = 0, limit: int = 50):
     try:
         feeds = await cache_manager.search_feed_by_body(body_query=query, offset=offset, limit=limit)
         my_logger.debug(f"feeds: {feeds}")

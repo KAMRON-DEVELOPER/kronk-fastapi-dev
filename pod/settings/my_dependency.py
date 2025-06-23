@@ -5,6 +5,7 @@ from uuid import UUID
 from authlib.jose import JWTClaims, jwt
 from authlib.jose.errors import BadSignatureError, DecodeError, ExpiredTokenError, InvalidTokenError, KeyMismatchError
 from fastapi import Depends, Header, WebSocket, WebSocketException, status
+
 from settings.my_config import get_settings
 from settings.my_exceptions import ApiException, JWTDecodeException, JWTExpiredException, JWTSignatureException, UnauthorizedException
 
@@ -30,17 +31,26 @@ class WebsocketCredential:
 
 
 def header_tokens_resolver(
-    verify_token: Optional[str] = Header(default=None),
-    forgot_password_token: Optional[str] = Header(default=None),
-    firebase_id_token: Optional[str] = Header(default=None),
+        verify_token: Optional[str] = Header(default=None),
+        forgot_password_token: Optional[str] = Header(default=None),
+        firebase_id_token: Optional[str] = Header(default=None),
 ):
     return HeaderTokensCredential(verify_token=verify_token, forgot_password_token=forgot_password_token, firebase_id_token=firebase_id_token)
 
 
-def jwt_resolver(authorization: str = Header(default=None)) -> JWTCredential:
+def strict_jwt_resolver(authorization: str = Header(default=None)) -> JWTCredential:
     """FastAPI Security Dependency to verify JWT token."""
     if authorization is None or not authorization.startswith("Bearer "):
         raise UnauthorizedException("Invalid or missing token.")
+
+    token = authorization.split(" ")[1]
+    return verify_jwt_token(token)
+
+
+def jwt_resolver(authorization: str = Header(default=None)) -> Optional[JWTCredential]:
+    """FastAPI Security Dependency to verify JWT token."""
+    if authorization is None or not authorization.startswith("Bearer "):
+        return None
 
     token = authorization.split(" ")[1]
     return verify_jwt_token(token)
@@ -101,5 +111,6 @@ def verify_jwt_token(token: str) -> JWTCredential:
 
 
 headerTokenDependency = Annotated[HeaderTokensCredential, Depends(dependency=header_tokens_resolver)]
-jwtDependency = Annotated[JWTCredential, Depends(dependency=jwt_resolver)]
+strictJwtDependency = Annotated[JWTCredential, Depends(dependency=strict_jwt_resolver)]
+jwtDependency = Annotated[Optional[JWTCredential], Depends(dependency=jwt_resolver)]
 websocketDependency = Annotated[WebsocketCredential, Depends(dependency=websocket_resolver)]

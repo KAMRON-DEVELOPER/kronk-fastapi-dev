@@ -24,7 +24,7 @@ from apps.users_app.schemas import (
 from apps.users_app.tasks import add_follow_to_db, delete_follow_from_db, notify_settings_stats, send_email_task
 from services.firebase_service import validate_firebase_token
 from settings.my_database import DBSession
-from settings.my_dependency import create_jwt_token, headerTokenDependency, jwtDependency
+from settings.my_dependency import create_jwt_token, headerTokenDependency, strictJwtDependency
 from settings.my_exceptions import AlreadyExistException, HeaderTokenException, NotFoundException, ValidationException
 from settings.my_minio import put_object_to_minio, remove_objects_from_minio, wipe_objects_from_minio
 from settings.my_redis import cache_manager
@@ -120,7 +120,7 @@ async def login_route(schema: LoginSchema, session: DBSession):
 
 
 @users_router.post(path="/auth/logout", response_model=ResultSchema, status_code=200)
-async def logout_route(jwt: jwtDependency, session: DBSession):
+async def logout_route(jwt: strictJwtDependency, session: DBSession):
     db_user: Optional[UserModel] = await session.get(UserModel, jwt.user_id)
     if not db_user:
         return {"ok": False}
@@ -215,7 +215,7 @@ async def google_auth_route(htd: headerTokenDependency, session: DBSession):
 
 
 @users_router.get(path="/profile", response_model=ProfileSchema, response_model_exclude_none=True, status_code=200)
-async def get_profile_route(jwt: jwtDependency, session: DBSession):
+async def get_profile_route(jwt: strictJwtDependency, session: DBSession):
     cached_user: Optional[dict] = await cache_manager.get_profile(user_id=jwt.user_id.hex)
 
     my_logger.debug(f"cached_user: {cached_user}")
@@ -230,7 +230,7 @@ async def get_profile_route(jwt: jwtDependency, session: DBSession):
 
 
 @users_router.patch(path="/profile/update", response_model=ResultSchema, status_code=status.HTTP_200_OK)
-async def update_profile_route(jwt: jwtDependency, session: DBSession, schema: ProfileUpdateSchema):
+async def update_profile_route(jwt: strictJwtDependency, session: DBSession, schema: ProfileUpdateSchema):
     user: Optional[UserModel] = await session.get(UserModel, jwt.user_id)
     if not user:
         raise NotFoundException("User not found.")
@@ -274,7 +274,7 @@ async def update_profile_route(jwt: jwtDependency, session: DBSession, schema: P
 
 @users_router.patch(path="/profile/update/media", response_model=ResultSchema, status_code=200)
 async def update_profile_media(
-        jwt: jwtDependency, session: DBSession, remove_target: Optional[str] = None, avatar_file: Optional[UploadFile] = None, banner_file: Optional[UploadFile] = None
+        jwt: strictJwtDependency, session: DBSession, remove_target: Optional[str] = None, avatar_file: Optional[UploadFile] = None, banner_file: Optional[UploadFile] = None
 ):
     try:
         if (user := await session.get(UserModel, jwt.user_id)) is None:
@@ -341,7 +341,7 @@ async def update_profile_media(
 
 
 @users_router.delete(path="/profile/delete", response_model=ResultSchema, status_code=200)
-async def delete_profile_route(jwt: jwtDependency, session: DBSession):
+async def delete_profile_route(jwt: strictJwtDependency, session: DBSession):
     user: Optional[UserModel] = await session.get(UserModel, jwt.user_id)
 
     if user is None:
@@ -361,7 +361,7 @@ async def delete_profile_route(jwt: jwtDependency, session: DBSession):
 
 
 @users_router.get(path="/search", status_code=200)
-async def user_search(jwt: jwtDependency, query: str, offset: int = 0, limit: int = 50):
+async def user_search(jwt: strictJwtDependency, query: str, offset: int = 0, limit: int = 50):
     try:
         user_id = jwt.user_id.hex
         users = await cache_manager.search_user_by_username(username_query=query, user_id=user_id, offset=offset, limit=limit)
@@ -376,7 +376,7 @@ async def user_search(jwt: jwtDependency, query: str, offset: int = 0, limit: in
 
 
 @users_router.post(path="/follow", response_model=ResultSchema, status_code=200)
-async def follow_route(jwt: jwtDependency, following_id: UUID):
+async def follow_route(jwt: strictJwtDependency, following_id: UUID):
     if jwt.user_id == following_id:
         raise ValidationException(detail="Are you piece of human shit! Cannot follow yourself")
 
@@ -388,7 +388,7 @@ async def follow_route(jwt: jwtDependency, following_id: UUID):
 
 
 @users_router.post(path="/unfollow", response_model=ResultSchema, status_code=200)
-async def unfollow_route(jwt: jwtDependency, following_id: UUID):
+async def unfollow_route(jwt: strictJwtDependency, following_id: UUID):
     if jwt.user_id == following_id:
         raise ValidationException(detail="Are you piece of human shit! Cannot follow yourself")
 
@@ -399,23 +399,23 @@ async def unfollow_route(jwt: jwtDependency, following_id: UUID):
 
 
 @users_router.get(path="/followers", status_code=200)
-async def get_followers_route(jwt: jwtDependency):
+async def get_followers_route(jwt: strictJwtDependency):
     return await cache_manager.get_followers(user_id=jwt.user_id.hex)
 
 
 @users_router.get(path="/followings", status_code=200)
-async def get_followings_route(jwt: jwtDependency):
+async def get_followings_route(jwt: strictJwtDependency):
     return await cache_manager.get_following(user_id=jwt.user_id.hex)
 
 
 @users_router.post(path="/auth/access", response_model=TokenSchema, status_code=status.HTTP_200_OK)
-async def refresh_access_token_route(jwt: jwtDependency):
+async def refresh_access_token_route(jwt: strictJwtDependency):
     access_token: str = create_jwt_token(subject={"id": jwt.user_id.hex})
     return {"access_token": access_token}
 
 
 @users_router.post(path="/auth/refresh", response_model=TokenSchema, status_code=status.HTTP_200_OK)
-async def refresh_refresh_token_route(jwt: jwtDependency):
+async def refresh_refresh_token_route(jwt: strictJwtDependency):
     subject = {"id": jwt.user_id.hex}
     access_token = create_jwt_token(subject=subject)
     refresh_token = create_jwt_token(subject=subject, for_refresh=True)

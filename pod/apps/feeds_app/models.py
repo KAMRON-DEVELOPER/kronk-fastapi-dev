@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import ARRAY, TIMESTAMP, UUID, Enum, ForeignKey, String, UniqueConstraint, Boolean
+from sqlalchemy import ARRAY, TIMESTAMP, UUID, Enum, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from apps.users_app.models import BaseModel, UserModel
@@ -41,20 +41,20 @@ class FeedModel(BaseModel):
     body: Mapped[str] = mapped_column(String(200))
     image_urls: Mapped[Optional[list]] = mapped_column(ARRAY(item_type=String, dimensions=4), nullable=True)
     video_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    scheduled_time: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, nullable=True)
-    display_dislikes: Mapped[bool] = mapped_column(Boolean(), default=False)
-    comment_policy: Mapped[CommentPolicy] = mapped_column(Enum(CommentPolicy, name="comment_policy"), default=CommentPolicy.everyone)
+    scheduled_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, nullable=True)
     feed_visibility: Mapped[FeedVisibility] = mapped_column(Enum(FeedVisibility, name="feed_visibility"), default=FeedVisibility.public)
+    comment_policy: Mapped[CommentPolicy] = mapped_column(Enum(CommentPolicy, name="comment_policy"), default=CommentPolicy.everyone)
     category_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("category_table.id"))
-    quoted_feed_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("feed_table.id"))
+    quote_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("feed_table.id"))
+
     author: Mapped["UserModel"] = relationship(argument="UserModel", back_populates="feeds")
     category: Mapped[Optional["CategoryModel"]] = relationship(argument="CategoryModel", back_populates="categories")
     feed_comments: Mapped[list["FeedCommentModel"]] = relationship(argument="FeedCommentModel", back_populates="feed")
     feed_engagements: Mapped[list["FeedEngagementModel"]] = relationship(argument="FeedEngagementModel", back_populates="feed")
     feed_reports: Mapped[list["FeedReportModel"]] = relationship(back_populates="feed")
     reposts: Mapped[list["RepostModel"]] = relationship(argument="RepostModel", back_populates="feed")
-    quoted_feed: Mapped[Optional["FeedModel"]] = relationship(remote_side="FeedModel.id", back_populates="quotes")
-    quotes: Mapped[list["FeedModel"]] = relationship(back_populates="quoted_feed", cascade="all, delete-orphan")
+    quote: Mapped[Optional["FeedModel"]] = relationship(remote_side="FeedModel.id", back_populates="quotes")
+    quotes: Mapped[list["FeedModel"]] = relationship(back_populates="quote", cascade="all, delete-orphan")
     tag_links: Mapped[list["FeedTagLink"]] = relationship(back_populates="feed", overlaps="feeds, tags", cascade="all, delete-orphan")
     tags: Mapped[list["TagModel"]] = relationship(secondary="feed_tag_link_table", back_populates="feeds", overlaps="feed_links,feed,tag")
 

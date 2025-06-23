@@ -2,10 +2,11 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from apps.users_app.models import BaseModel, UserModel
 from sqlalchemy import ARRAY, TIMESTAMP, Enum, ForeignKey, String, Text, UniqueConstraint, func, select, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship
+
+from apps.users_app.models import BaseModel, UserModel
 from utility.my_enums import GroupType, MemberType
 
 
@@ -15,7 +16,7 @@ class MessageBaseModel(BaseModel):
     message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     image_urls: Mapped[Optional[list[str]]] = mapped_column(ARRAY(item_type=String), nullable=True)
     video_urls: Mapped[Optional[list[str]]] = mapped_column(ARRAY(item_type=String), nullable=True)
-    scheduled_time: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    scheduled_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
     read_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), default=None, nullable=True)
 
 

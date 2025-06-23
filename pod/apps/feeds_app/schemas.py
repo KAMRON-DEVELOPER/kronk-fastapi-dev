@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Optional
 from uuid import UUID
 
+from fastapi import UploadFile
 from pydantic import BaseModel, field_validator
 
 from settings.my_exceptions import ValidationException
@@ -9,11 +10,19 @@ from utility.my_enums import FeedVisibility, CommentPolicy
 from utility.my_logger import my_logger
 
 
+class FeedCreateMediaSchema(BaseModel):
+    image_files: Optional[list[UploadFile]] = None,
+    video_file: Optional[UploadFile] = None
+
+
 class FeedCreateSchema(BaseModel):
     body: Optional[str] = None
-    scheduled_time: Optional[datetime] = None
+    scheduled_at: Optional[datetime] = None
+    feed_visibility: Optional[FeedVisibility] = None
+    comment_policy: Optional[CommentPolicy] = None
+    quote_id: Optional[UUID] = None
     tags: Optional[list[UUID]] = None
-    category: Optional[UUID] = None
+    category_id: Optional[UUID] = None
 
     class Config:
         from_attributes = True
@@ -26,11 +35,11 @@ class FeedCreateSchema(BaseModel):
             raise ValidationException("body is exceeded max 200 character limit.")
         return value
 
-    @field_validator("scheduled_time")
+    @field_validator("scheduled_at")
     def validate_scheduled(cls, value: Optional[datetime]):
         try:
             if value is not None:
-                my_logger.debug(f"scheduled_time field_validator: {value}, type: {type(value)}")
+                my_logger.debug(f"scheduled_at field_validator: {value}, type: {type(value)}")
                 now = datetime.now(UTC)
                 max_future = now + timedelta(days=7)
 
