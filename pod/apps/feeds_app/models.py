@@ -5,7 +5,7 @@ from sqlalchemy import ARRAY, TIMESTAMP, UUID, Enum, ForeignKey, String, UniqueC
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from apps.users_app.models import BaseModel, UserModel
-from utility.my_enums import InteractionType, FeedVisibility, ReportReason, CommentPolicy
+from utility.my_enums import EngagementType, FeedVisibility, ReportReason, CommentPolicy
 
 
 class CategoryModel(BaseModel):
@@ -51,8 +51,6 @@ class FeedModel(BaseModel):
     category: Mapped[Optional["CategoryModel"]] = relationship(argument="CategoryModel", back_populates="categories")
     feed_comments: Mapped[list["FeedCommentModel"]] = relationship(argument="FeedCommentModel", back_populates="feed")
     feed_engagements: Mapped[list["FeedEngagementModel"]] = relationship(argument="FeedEngagementModel", back_populates="feed")
-    feed_views: Mapped[list["FeedViewModel"]] = relationship(argument="FeedViewModel", back_populates="feed")
-    feed_bookmarks: Mapped[list["FeedBookmarkModel"]] = relationship(back_populates="feed")
     feed_reports: Mapped[list["FeedReportModel"]] = relationship(back_populates="feed")
     reposts: Mapped[list["RepostModel"]] = relationship(argument="RepostModel", back_populates="feed")
     quoted_feed: Mapped[Optional["FeedModel"]] = relationship(remote_side="FeedModel.id", back_populates="quotes")
@@ -87,7 +85,6 @@ class FeedCommentModel(BaseModel):
     parent: Mapped[Optional["FeedCommentModel"]] = relationship(argument="FeedCommentModel", remote_side="FeedCommentModel.id", back_populates="replies")
     replies: Mapped[list["FeedCommentModel"]] = relationship(back_populates="parent")
     feed_comment_engagements: Mapped[list["FeedCommentEngagementModel"]] = relationship(argument="FeedCommentEngagementModel", back_populates="feed_comment")
-    feed_comment_views: Mapped[list["FeedCommentViewModel"]] = relationship(argument="FeedCommentViewModel", back_populates="feed_comment")
 
     def __repr__(self):
         return "FeedCommentModel"
@@ -98,7 +95,7 @@ class FeedEngagementModel(BaseModel):
     __table_args__ = (UniqueConstraint("user_id", "feed_id", name="uq_feed_engagement"),)
     user_id: Mapped[UUID] = mapped_column(ForeignKey("user_table.id"))
     feed_id: Mapped[UUID] = mapped_column(ForeignKey("feed_table.id"))
-    engagement_type: Mapped[InteractionType] = mapped_column(Enum(InteractionType, name="engagement_type"), nullable=False)
+    engagement_type: Mapped[EngagementType] = mapped_column(Enum(EngagementType, name="engagement_type"), nullable=False)
     user: Mapped["UserModel"] = relationship(argument="UserModel", back_populates="feed_engagements")
     feed: Mapped["FeedModel"] = relationship(argument="FeedModel", back_populates="feed_engagements")
 
@@ -111,45 +108,12 @@ class FeedCommentEngagementModel(BaseModel):
     __table_args__ = (UniqueConstraint("user_id", "feed_comment_id", name="uq_feed_comment_engagement"),)
     user_id: Mapped[UUID] = mapped_column(ForeignKey("user_table.id"))
     feed_comment_id: Mapped[UUID] = mapped_column(ForeignKey("feed_comment_table.id"))
-    engagement_type: Mapped[InteractionType] = mapped_column(Enum(InteractionType, name="engagement_type"), nullable=False)
+    engagement_type: Mapped[EngagementType] = mapped_column(Enum(EngagementType, name="engagement_type"), nullable=False)
     user: Mapped["UserModel"] = relationship(argument="UserModel", back_populates="feed_comment_engagements")
     feed_comment: Mapped["FeedCommentModel"] = relationship(argument="FeedCommentModel", back_populates="feed_comment_engagements")
 
     def __repr__(self):
         return "FeedCommentEngagementModel"
-
-
-class FeedViewModel(BaseModel):
-    __tablename__ = "feed_view_table"
-    __table_args__ = (UniqueConstraint("user_id", "feed_id", name="uq_feed_view"),)
-    user_id: Mapped[UUID] = mapped_column(ForeignKey("user_table.id"))
-    feed_id: Mapped[UUID] = mapped_column(ForeignKey("feed_table.id"))
-    ip_address: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    country: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    city: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    user: Mapped["UserModel"] = relationship(argument="UserModel", back_populates="feed_views")
-    feed: Mapped["FeedModel"] = relationship(argument="FeedModel", back_populates="feed_views")
-
-    def __repr__(self):
-        return "FeedViewModel"
-
-
-class FeedCommentViewModel(BaseModel):
-    __tablename__ = "feed_comment_view_table"
-    __table_args__ = (UniqueConstraint("user_id", "feed_comment_id", name="uq_feed_comment_view"),)
-    user_id: Mapped[UUID] = mapped_column(ForeignKey("user_table.id"))
-    feed_comment_id: Mapped[UUID] = mapped_column(ForeignKey("feed_comment_table.id"))
-    user: Mapped["UserModel"] = relationship(argument="UserModel", back_populates="feed_comment_views")
-    feed_comment: Mapped["FeedCommentModel"] = relationship(argument="FeedCommentModel", back_populates="feed_comment_views")
-
-
-class FeedBookmarkModel(BaseModel):
-    __tablename__ = "feed_bookmark_table"
-    __table_args__ = (UniqueConstraint("user_id", "feed_id", name="uq_feed_bookmark"),)
-    user_id: Mapped[UUID] = mapped_column(ForeignKey("user_table.id"))
-    user: Mapped["UserModel"] = relationship(argument="UserModel", back_populates="feed_bookmarks")
-    feed_id: Mapped[UUID] = mapped_column(ForeignKey("feed_table.id"))
-    feed: Mapped["FeedModel"] = relationship(argument="FeedModel", back_populates="feed_bookmarks")
 
 
 class FeedReportModel(BaseModel):

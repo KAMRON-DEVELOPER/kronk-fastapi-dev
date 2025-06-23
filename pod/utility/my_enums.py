@@ -18,7 +18,7 @@ class UserStatus(AutoName):
     inactive = auto()
 
 
-class InteractionType(AutoName):
+class EngagementType(AutoName):
     reposts = auto()
     quotes = auto()
     likes = auto()
@@ -26,7 +26,7 @@ class InteractionType(AutoName):
     bookmarks = auto()
 
 
-class InteractionStatus(TypedDict):
+class EngagementStatus(TypedDict):
     is_reposted: bool
     is_quoted: bool
     is_liked: bool

@@ -16,7 +16,7 @@ from redis.asyncio.client import PubSub
 
 from apps.chats_app.schemas import ChatTileSchema
 from settings.my_config import get_settings
-from utility.my_enums import InteractionType
+from utility.my_enums import EngagementType
 from utility.my_logger import my_logger
 from utility.my_types import StatisticsSchema
 from utility.validators import escape_redisearch_special_chars
@@ -188,80 +188,80 @@ class CacheManager:
 
             feeds.append(feed_meta)
 
-        # Fetch engagement counts & user-specific engagement
+        # Process engagement results
+        engagement_keys = ["comments", "reposts", "quotes", "likes", "views", "bookmarks"]
+        interaction_keys = ["reposted", "quoted", "liked", "viewed", "bookmarked"]
+
         async with self.cache_redis.pipeline() as pipe:
             for feed in feeds:
                 feed_id = feed["id"]
-                pipe.scard(f"feeds:{feed_id}:comments")
-                pipe.scard(f"feeds:{feed_id}:reposts")
-                pipe.scard(f"feeds:{feed_id}:quotes")
-                pipe.scard(f"feeds:{feed_id}:likes")
-                pipe.scard(f"feeds:{feed_id}:views")
-                pipe.scard(f"feeds:{feed_id}:bookmarks")
+                for key in engagement_keys:
+                    pipe.scard(f"feeds:{feed_id}:{key}")
                 if user_id:
-                    pipe.sismember(f"feeds:{feed_id}:comments", user_id)
-                    pipe.sismember(f"feeds:{feed_id}:reposts", user_id)
-                    pipe.sismember(f"feeds:{feed_id}:quotes", user_id)
-                    pipe.sismember(f"feeds:{feed_id}:likes", user_id)
-                    pipe.sismember(f"feeds:{feed_id}:views", user_id)
-                    pipe.sismember(f"feeds:{feed_id}:bookmarks", user_id)
+                    for key in engagement_keys[1:]:
+                        pipe.sismember(f"feeds:{feed_id}:{key}", user_id)
             results = await pipe.execute()
 
-        # Process engagement results
-        for i, feed in enumerate(feeds):
-            offset = i * (12 if user_id else 6)
+        for index, feed in enumerate(feeds):
+            has_interactions = user_id is not None
+            chunk_size = len(engagement_keys) + (len(interaction_keys) if has_interactions else 0)
+            start = index * chunk_size
 
-            likes = results[offset]
-            dislikes = results[offset + 1]
-            comments = results[offset + 2]
-            views = results[offset + 3]
-            for key, value in (("likes", likes), ("dislikes", dislikes), ("comments", comments), ("views", views)):
-                if value > 0:
-                    feed.update({key: value})
+            metrics = results[start:start + len(engagement_keys)]
+            engagement = {key: value for key, value in zip(engagement_keys, metrics) if value > 0}
 
-            if user_id:
-                is_liked = bool(results[offset + 4])
-                is_disliked = bool(results[offset + 5])
-                is_viewed = bool(results[offset + 6])
-                is_bookmarked = bool(results[offset + 7])
-                for key, value in (("is_liked", is_liked), ("is_disliked", is_disliked), ("is_viewed", is_viewed), ("is_bookmarked", is_bookmarked)):
-                    if value:
-                        feed.update({key: value})
+            if has_interactions:
+                interactions: list[bool] = results[start + len(engagement_keys):start + chunk_size]
+                engagement.update({interaction_key: True for interaction_key, interacted in zip(interaction_keys, interactions) if interacted})
+
+            feed["engagement"] = engagement
 
         # Fetch author profiles
         author_ids = {feed["author_id"] for feed in feeds}
+        keys = ["id", "name", "username", "avatar_url"]
+
         async with self.cache_redis.pipeline() as pipe:
-            for author_id in author_ids:
-                pipe.hmget(name=f"users:{author_id}:profile", keys=["id", "name", "username", "avatar_url"])
-            profiles_list: list[list] = await pipe.execute()
+            for aid in author_ids:
+                pipe.hmget(f"users:{aid}:profile", keys)
+            profiles = await pipe.execute()
 
-        # Map author_id to profile dictionary
-        author_profiles = {
-            profile[0]: {"id": profile[0], "name": profile[1], "username": profile[2], "avatar_url": profile[3]}
-            for profile in profiles_list if profile and profile[0]
-        }
+        author_profiles = {profile[0]: dict(zip(keys, profile)) for profile in profiles if profile and profile[0]}
 
-        # Assign author profiles to feeds
         for feed in feeds:
-            author_id = feed.pop("author_id")
-            feed["author"] = author_profiles.get(author_id, {})
+            feed["author"] = author_profiles.get(feed.pop("author_id"), {})
 
         return feeds
 
-    async def set_feed_interaction(self, user_id: str, feed_id: str, interaction_type: InteractionType):
-        feed_action_key = f"feeds:{feed_id}:{interaction_type.value}"
-        user_action_key = f"users:{user_id}:{interaction_type.value}"
+    async def set_feed_engagement(self, user_id: str, feed_id: str, engagement_type: EngagementType):
+        feed_action_key = f"feeds:{feed_id}:{engagement_type.value}"
+        user_action_key = f"users:{user_id}:{engagement_type.value}"
         async with self.cache_redis.pipeline() as pipe:
             pipe.sadd(feed_action_key, user_id)
             pipe.sadd(user_action_key, feed_id)
             await pipe.execute()
 
-    async def remove_feed_interaction(self, user_id: str, feed_id: str, interaction_type: InteractionType):
-        feed_action_key = f"feeds:{feed_id}:{interaction_type.value}"
-        user_action_key = f"users:{user_id}:{interaction_type.value}"
+    async def remove_feed_engagement(self, user_id: str, feed_id: str, engagement_type: EngagementType):
+        feed_action_key = f"feeds:{feed_id}:{engagement_type.value}"
+        user_action_key = f"users:{user_id}:{engagement_type.value}"
         async with self.cache_redis.pipeline() as pipe:
             pipe.srem(feed_action_key, user_id)
             pipe.srem(user_action_key, feed_id)
+            await pipe.execute()
+
+    async def set_comment_engagement(self, user_id: str, comment_id: str, engagement_type: EngagementType):
+        comment_action_key = f"comments:{comment_id}:{engagement_type.value}"
+        user_action_key = f"users:{user_id}:comments:{engagement_type.value}"
+        async with self.cache_redis.pipeline() as pipe:
+            pipe.sadd(comment_action_key, user_id)
+            pipe.sadd(user_action_key, comment_id)
+            await pipe.execute()
+
+    async def remove_comment_engagement(self, user_id: str, comment_id: str, engagement_type: EngagementType):
+        comment_action_key = f"comments:{comment_id}:{engagement_type.value}"
+        user_action_key = f"users:{user_id}:comments:{engagement_type.value}"
+        async with self.cache_redis.pipeline() as pipe:
+            pipe.srem(comment_action_key, user_id)
+            pipe.srem(user_action_key, comment_id)
             await pipe.execute()
 
     async def get_user_engagement_for_feeds(self, user_id: str, feed_ids: list[str]) -> dict[str, dict[str, bool]]:

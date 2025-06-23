@@ -12,14 +12,11 @@ from utility.my_enums import FollowPolicy, FollowStatus, UserRole, UserStatus
 if TYPE_CHECKING:
     from ..chats_app.models import ChatMessageModel, ChatModel, ChatParticipantModel, GroupMessageModel, GroupModel, GroupParticipantModel
     from ..feeds_app.models import (
-        FeedBookmarkModel,
         FeedCommentEngagementModel,
         FeedCommentModel,
-        FeedCommentViewModel,
         FeedEngagementModel,
         FeedModel,
         FeedReportModel,
-        FeedViewModel,
         RepostModel,
     )
 
@@ -81,9 +78,6 @@ class UserModel(BaseModel):
     feed_comments: Mapped[list["FeedCommentModel"]] = relationship(argument="FeedCommentModel", back_populates="user")
     feed_engagements: Mapped[list["FeedEngagementModel"]] = relationship(argument="FeedEngagementModel", back_populates="user")
     feed_comment_engagements: Mapped[list["FeedCommentEngagementModel"]] = relationship(argument="FeedCommentEngagementModel", back_populates="user")
-    feed_views: Mapped[list["FeedViewModel"]] = relationship(argument="FeedViewModel", back_populates="user")
-    feed_comment_views: Mapped[list["FeedCommentViewModel"]] = relationship(argument="FeedCommentViewModel", back_populates="user")
-    feed_bookmarks: Mapped[list["FeedBookmarkModel"]] = relationship(argument="FeedBookmarkModel", back_populates="user")
     feed_reports: Mapped[list["FeedReportModel"]] = relationship(argument="FeedReportModel", back_populates="user")
 
     group_participants: Mapped[list["GroupParticipantModel"]] = relationship(argument="GroupParticipantModel", back_populates="user", cascade="all, delete-orphan")

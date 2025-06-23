@@ -6,8 +6,8 @@ from fastapi import APIRouter, Form, HTTPException, UploadFile, status
 from ffmpeg.asyncio import FFmpeg
 from sqlalchemy import Result, select
 
-from apps.feeds_app.models import CategoryModel, InteractionType, FeedModel, TagModel
-from apps.feeds_app.schemas import FeedCreateSchema, FeedInSchema, FeedResponseSchema
+from apps.feeds_app.models import CategoryModel, EngagementType, FeedModel, TagModel
+from apps.feeds_app.schemas import FeedCreateSchema, FeedSchema, FeedResponseSchema
 from apps.feeds_app.tasks import notify_followers_task
 from apps.users_app.schemas import ResultSchema
 from settings.my_config import get_settings
@@ -52,7 +52,7 @@ async def create_feed_route(jwt: jwtDependency, schema: FeedCreateSchema, sessio
         await session.commit()
         await session.refresh(instance=feed, attribute_names=["author", "tags", "category"])
 
-        feed_schema = FeedInSchema.model_validate(obj=feed)
+        feed_schema = FeedSchema.model_validate(obj=feed)
 
         await notify_followers_task.kiq(user_id=jwt.user_id.hex)
 
@@ -154,63 +154,60 @@ async def delete_feed_route(jwt: jwtDependency, session: DBSession, feed_id: UUI
     await cache_manager.delete_feed(author_id=jwt.user_id.hex, feed_id=feed_id.hex)
 
 
-@feed_router.get(path="/timeline/home", response_model=list[FeedResponseSchema], response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
-async def get_home_timeline(jwt: jwtDependency, start: int = 0, end: int = 10):
-    try:
-        feeds = await cache_manager.get_following_timeline(user_id=jwt.user_id.hex, start=start, end=end)
-        return feeds
-    except Exception as e:
-        my_logger.critical(f"Exception in get_home_timeline_route: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Exception in get_home_timeline_route: {e}")
-
-
-@feed_router.get(path="/timeline/global", response_model=list[FeedResponseSchema], response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
-async def get_global_timeline_route(jwt: jwtDependency, start: int = 0, end: int = 10):
+@feed_router.get(path="/timeline/discover", response_model=FeedResponseSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
+async def discover_timeline_route(jwt: jwtDependency, start: int = 0, end: int = 10):
     try:
         feeds = await cache_manager.get_discover_timeline(user_id=jwt.user_id.hex, start=start, end=end)
+        my_logger.debug(f"feeds: {feeds}")
         return feeds
     except Exception as e:
         print(f"Exception in get_global_timeline: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Exception in get_global_timeline: {e}")
 
 
-@feed_router.get(path="/timeline/user", response_model=list[FeedResponseSchema], response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
-async def user_timeline(jwt: jwtDependency, start: int = 0, end: int = 19):
+@feed_router.get(path="/timeline/following", response_model=FeedResponseSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
+async def following_timeline_route(jwt: jwtDependency, start: int = 0, end: int = 10):
+    try:
+        feeds = await cache_manager.get_following_timeline(user_id=jwt.user_id.hex, start=start, end=end)
+        my_logger.debug(f"feeds: {feeds}")
+        return feeds
+    except Exception as e:
+        my_logger.critical(f"Exception in get_home_timeline_route: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Exception in get_home_timeline_route: {e}")
+
+
+@feed_router.get(path="/timeline/user", response_model=FeedResponseSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
+async def user_timeline_route(jwt: jwtDependency, start: int = 0, end: int = 19):
     try:
         feeds = await cache_manager.get_user_timeline(user_id=jwt.user_id.hex, start=start, end=end)
+        my_logger.debug(f"feeds: {feeds}")
         return feeds
     except Exception as e:
         my_logger.debug(f"Exception in user_timeline route: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Server error occurred while creating feed.")
 
 
-@feed_router.post(path="/interaction/set", response_model=ResultSchema, status_code=200)
-async def set_feed_interaction(jwt: jwtDependency, feed_id: str, interaction_type: InteractionType):
-    user_id = jwt.user_id.hex
-
-    await cache_manager.set_feed_interaction(user_id=user_id, feed_id=feed_id, interaction_type=interaction_type)
-
-    if interaction_type == InteractionType.likes:
-        await cache_manager.remove_feed_interaction(user_id=user_id, feed_id=feed_id, interaction_type=InteractionType.dislikes)
-    elif interaction_type == InteractionType.dislikes:
-        await cache_manager.remove_feed_interaction(user_id=user_id, feed_id=feed_id, interaction_type=InteractionType.likes)
-
+@feed_router.post(path="/engagement/set", response_model=ResultSchema, status_code=200)
+async def set_feed_engagement(jwt: jwtDependency, feed_id: str, interaction_type: EngagementType):
+    await cache_manager.set_feed_engagement(user_id=jwt.user_id.hex, feed_id=feed_id, engagement_type=interaction_type)
     return {"ok": True}
 
 
-@feed_router.post(path="/interaction/remove", response_model=ResultSchema, status_code=200)
-async def remove_feed_interaction(jwt: jwtDependency, feed_id: str, interaction_type: InteractionType):
-    await cache_manager.remove_feed_interaction(user_id=jwt.user_id.hex, feed_id=feed_id, interaction_type=interaction_type)
+@feed_router.post(path="/engagement/remove", response_model=ResultSchema, status_code=200)
+async def remove_feed_engagement(jwt: jwtDependency, feed_id: str, interaction_type: EngagementType):
+    await cache_manager.remove_feed_engagement(user_id=jwt.user_id.hex, feed_id=feed_id, engagement_type=interaction_type)
     return {"ok": True}
 
 
-@feed_router.post(path="/comments/interaction/set", status_code=200)
-async def track_feed_comment_view_route(jwt: jwtDependency, comment_id: str):
+@feed_router.post(path="/comment/engagement/set", status_code=200)
+async def set_comment_engagement(jwt: jwtDependency, comment_id: str, engagement_type: EngagementType):
+    await cache_manager.set_comment_engagement(user_id=jwt.user_id.hex, comment_id=comment_id, engagement_type=engagement_type)
     return {"ok": True}
 
 
-@feed_router.post(path="/comments/interaction/remove", status_code=200)
-async def track_feed_comment_reaction_route(jwt: jwtDependency, comment_id: str, reaction: InteractionType):
+@feed_router.post(path="/comment/engagement/remove", status_code=200)
+async def remove_comment_engagement(jwt: jwtDependency, comment_id: str, engagement_type: EngagementType):
+    await cache_manager.remove_comment_engagement(user_id=jwt.user_id.hex, comment_id=comment_id, engagement_type=engagement_type)
     return {"ok": True}
 
 

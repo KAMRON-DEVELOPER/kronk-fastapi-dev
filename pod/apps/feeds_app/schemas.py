@@ -56,6 +56,24 @@ class AuthorSchema(BaseModel):
         json_encoders = {UUID: lambda v: v.hex, datetime: lambda v: v.timestamp() if v is not None else None}
 
 
+class EngagementSchema(BaseModel):
+    comments: Optional[int] = None
+    reposts: Optional[int] = None
+    quotes: Optional[int] = None
+    likes: Optional[int] = None
+    views: Optional[int] = None
+    bookmarks: Optional[int] = None
+    reposted: Optional[bool] = None
+    quoted: Optional[bool] = None
+    liked: Optional[bool] = None
+    viewed: Optional[bool] = None
+    bookmarked: Optional[bool] = None
+
+    class Config:
+        from_attributes = True
+        json_encoders = {UUID: lambda v: v.hex, datetime: lambda v: v.timestamp() if v is not None else None}
+
+
 class CategorySchema(BaseModel):
     name: str
 
@@ -70,18 +88,18 @@ class TagSchema(BaseModel):
         from_attributes = True
 
 
-class FeedInSchema(BaseModel):
+class FeedSchema(BaseModel):
     id: UUID
     created_at: datetime
     updated_at: datetime
-    author: AuthorSchema
     body: str
-    image_urls: Optional[list[str]] = []
+    author: AuthorSchema
     video_url: Optional[str] = None
-    scheduled_time: Optional[datetime] = None
-    display_dislikes: bool = False
+    image_urls: Optional[list[str]] = []
+    scheduled_at: Optional[datetime] = None
     feed_visibility: FeedVisibility
     comment_policy: CommentPolicy
+    engagement: Optional[EngagementSchema] = None
     tags: list[TagSchema] = []
     category: Optional[CategorySchema] = None
 
@@ -90,24 +108,8 @@ class FeedInSchema(BaseModel):
         json_encoders = {UUID: lambda v: v.hex, datetime: lambda v: v.timestamp() if v is not None else None}
 
 
-class FeedOutSchema(FeedInSchema):
-    likes: Optional[int] = None
-    dislikes: Optional[int] = None
-    comments: Optional[int] = None
-    views: Optional[int] = None
-    is_reposted: Optional[bool] = None
-    is_quoted: Optional[bool] = None
-    is_liked: Optional[bool] = None
-    is_viewed: Optional[bool] = None
-    is_bookmarked: Optional[bool] = None
-
-    class Config:
-        from_attributes = True
-        json_encoders = {UUID: lambda v: v.hex, datetime: lambda v: v.timestamp() if v is not None else None}
-
-
 class FeedResponseSchema(BaseModel):
-    feeds: list[FeedOutSchema]
+    feeds: list[FeedSchema]
     end: int
 
     class Config:
