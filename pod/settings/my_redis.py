@@ -243,7 +243,7 @@ class CacheManager:
         entity_type = "feeds" if feed_id else "comments"
         entity_id = feed_id or comment_id
         action_key = f"{entity_type}:{entity_id}:{engagement_type.value}"
-        user_key = f"users:{user_id}:{'comments' if comment_id else ''}:{engagement_type.value}"
+        user_key = f"users:{user_id}:{'comments' if comment_id else 'feeds'}:{engagement_type.value}"
 
         async with self.cache_redis.pipeline() as pipe:
             pipe.sadd(action_key, user_id)
@@ -271,12 +271,11 @@ class CacheManager:
         interaction_keys = ["reposted", "quoted", "liked", "viewed", "bookmarked"]
 
         async with self.cache_redis.pipeline() as pipe:
-            # Add total engagement counts
             for key in engagement_keys:
                 pipe.scard(f"{entity_type}:{entity_id}:{key}")
 
-                for _key in engagement_keys[1:]:
-                    pipe.sismember(f"{entity_type}:{entity_id}:{_key}", user_id)
+            for key in engagement_keys[1:]:
+                pipe.sismember(f"{entity_type}:{entity_id}:{key}", user_id)
 
             results = await pipe.execute()
 

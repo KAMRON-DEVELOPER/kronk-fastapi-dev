@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, UTC
 from typing import Annotated, Optional
 from uuid import UUID
 
@@ -6,16 +7,16 @@ from fastapi import APIRouter, Form, HTTPException, UploadFile, status, File
 from ffmpeg.asyncio import FFmpeg
 from sqlalchemy import Result, select
 
-from apps.feeds_app.models import CategoryModel, EngagementType, FeedModel, TagModel
-from apps.feeds_app.schemas import FeedCreateSchema, FeedSchema, FeedResponseSchema, EngagementSchema, FeedCreateMediaSchema
+from apps.feeds_app.models import EngagementType, FeedModel, TagModel, CategoryModel
+from apps.feeds_app.schemas import FeedSchema, FeedResponseSchema, EngagementSchema
 from apps.feeds_app.tasks import notify_followers_task
-from apps.users_app.schemas import ResultSchema
 from settings.my_config import get_settings
 from settings.my_database import DBSession
 from settings.my_dependency import JWTCredential, strictJwtDependency, jwtDependency
 from settings.my_exceptions import NotFoundException, ValidationException
 from settings.my_minio import put_file_to_minio, put_object_to_minio, remove_objects_from_minio
 from settings.my_redis import cache_manager
+from utility.my_enums import CommentPolicy, FeedVisibility
 from utility.my_logger import my_logger
 from utility.validators import allowed_image_extension, allowed_video_extension, get_file_extension, get_video_duration_using_ffprobe
 
@@ -25,38 +26,73 @@ settings = get_settings()
 
 
 @feed_router.post(path="/create", status_code=201)
-async def create_feed_route(jwt: strictJwtDependency, schm: Annotated[FeedCreateSchema, Form()], media: Annotated[FeedCreateMediaSchema, File()], session: DBSession):
+async def create_feed_route(jwt: strictJwtDependency, session: DBSession,
+                            body: Annotated[Optional[str], Form()] = None,
+                            scheduled_at: Annotated[Optional[datetime], Form()] = None,
+                            feed_visibility: Annotated[Optional[FeedVisibility], Form()] = None,
+                            comment_policy: Annotated[Optional[CommentPolicy], Form()] = None,
+                            tags: Annotated[Optional[list[UUID]], Form()] = None,
+                            category_id: Annotated[Optional[UUID], Form()] = None,
+                            image_files: Annotated[Optional[list[UploadFile]], File()] = None,
+                            video_file: Annotated[Optional[UploadFile], File()] = None):
     try:
-        if "a" == "a":
-            my_logger.debug(f"schm: {schm.body}")
-            my_logger.debug(f"media len: {len(media.image_files)}")
-            return {"feed_id": "I HATE YOU"}
+        if not body.strip():
+            raise ValidationException(detail="body must be provided.")
+        if len(body) > 300:
+            raise ValidationException(detail="body is exceeded max 300 character limit.")
 
-        # 1. Validate category existence
-        if schm.category_id:
-            category_exists: Optional[CategoryModel] = await session.scalar(select(CategoryModel).where(CategoryModel.id == schm.category_id))
+        if scheduled_at is not None:
+            now = datetime.now(UTC)
+            max_future = now + timedelta(days=7)
+            if scheduled_at < now:
+                raise ValidationException("Scheduled time cannot be in the past.")
+            if scheduled_at > max_future:
+                raise ValidationException("Scheduled time cannot be more than 7 days in the future.")
+
+        feed = FeedModel(author_id=jwt.user_id, body=body, scheduled_at=scheduled_at, feed_visibility=feed_visibility, comment_policy=comment_policy, category_id=category_id)
+
+        if category_id:
+            category_exists: Optional[CategoryModel] = await session.scalar(select(CategoryModel).where(CategoryModel.id == category_id))
             if not category_exists:
                 raise HTTPException(status_code=400, detail="Invalid category ID.")
 
-        # 2. Validate tag UUIDs existence
-        if schm.tags:
-            tag_ids_in_db = await session.scalars(select(TagModel.id).where(TagModel.id.in_(schm.tags)))
+        if tags:
+            tag_ids_in_db = await session.scalars(select(TagModel.id).where(TagModel.id.in_(tags)))
             found_tag_ids = set(tag_ids_in_db.all())
-            missing_tags = set(schm.tags) - found_tag_ids
+            missing_tags = set(tags) - found_tag_ids
             if missing_tags:
                 raise NotFoundException(detail=f"Tag(s) not found: {', '.join(str(tag) for tag in missing_tags)}")
 
-        feed = FeedModel(author_id=jwt.user_id, body=schm.body, scheduled_at=schm.scheduled_at, category_id=schm.category_id)
-
-        # 4. Add tags if any
-        if schm.tags:
-            tags = await session.scalars(select(TagModel).where(TagModel.id.in_(schm.tags)))
+        if tags:
+            tags = await session.scalars(select(TagModel).where(TagModel.id.in_(tags)))
             feed.tags.extend(tags.all())
+
+        my_logger.debug(f"1 feed id: {feed.id}")
 
         session.add(instance=feed)
         await session.commit()
-        await session.refresh(instance=feed, attribute_names=["author", "tags", "category"])
+        await session.refresh(instance=feed)
 
+        my_logger.debug(f"2 feed id: {feed.id}")
+
+        if image_files:
+            my_logger.debug(f"image_files: {image_files}")
+            urls = await validate_and_save_images(jwt=jwt, image_files=image_files)
+            my_logger.debug(f"urls: {urls}")
+            if urls:
+                feed.image_urls = urls
+                await cache_manager.update_feed(feed_id=feed.id.hex, key="image_urls", value=urls)
+
+        if video_file:
+            my_logger.debug(f"video_file.filename: {video_file.filename}")
+            object_name = await validate_and_save_video(jwt=jwt, video_file=video_file)
+            my_logger.debug(f"object_name: {object_name}")
+            feed.video_url = object_name
+            await cache_manager.update_feed(feed_id=feed.id.hex, key="video_url", value=object_name)
+
+        await session.commit()
+        await session.refresh(instance=feed, attribute_names=["id", "created_at", "updated_at", "author", "tags", "category"])
+        my_logger.debug("it is raising when FeedSchema.model_validate(obj=feed)")
         feed_schema = FeedSchema.model_validate(obj=feed)
 
         await notify_followers_task.kiq(user_id=jwt.user_id.hex)
@@ -78,8 +114,7 @@ async def update_feed_route(
         feed_id: UUID,
         body: Annotated[Optional[str], Form()] = None,
         remove_image_targets: Annotated[Optional[list[str]], Form()] = None,
-        remove_video_target: Annotated[Optional[str], Form()] = None,
-):
+        remove_video_target: Annotated[Optional[str], Form()] = None):
     try:
         my_logger.debug(f"body: {body}")
         my_logger.debug(f"remove_image_targets: {remove_image_targets}")
@@ -114,35 +149,6 @@ async def update_feed_route(
 
     except Exception as e:
         my_logger.exception(f"Exception while creating post media, e: {e}")
-        return {"ok": False}
-
-
-@feed_router.patch(path="/update/media", response_model=ResultSchema, status_code=200)
-async def update_feed_media_route(jwt: strictJwtDependency, session: DBSession, feed_id: UUID, image_files: Optional[list[UploadFile]] = None,
-                                  video_file: Optional[UploadFile] = None):
-    try:
-        if (feed := await session.get(FeedModel, feed_id)) is None:
-            raise NotFoundException(detail="feed not found")
-
-        if image_files:
-            my_logger.debug(f"image_files: {image_files}")
-            urls = await validate_and_save_images(jwt=jwt, image_files=image_files)
-            my_logger.debug(f"urls: {urls}")
-            if urls:
-                # feed.image_urls = urls
-                await cache_manager.update_feed(feed_id=feed_id.hex, key="image_urls", value=urls)
-
-        if video_file:
-            my_logger.debug(f"video_file.filename: {video_file.filename}")
-            object_name = await validate_and_save_video(jwt=jwt, video_file=video_file)
-            my_logger.debug(f"object_name: {object_name}")
-            feed.video_url = object_name
-            await cache_manager.update_feed(feed_id=feed_id.hex, key="video_url", value=object_name)
-
-        await session.commit()
-        return {"ok": True}
-    except Exception as e:
-        my_logger.exception(f"Exception e: {e}")
         return {"ok": False}
 
 
@@ -195,15 +201,25 @@ async def user_timeline_route(jwt: strictJwtDependency, start: int = 0, end: int
 
 
 @feed_router.post(path="/engagement/set", response_model=EngagementSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
-async def set_feed_engagement(jwt: strictJwtDependency, engagement_type: EngagementType, feed_id: Optional[UUID] = None, comment_id: Optional[UUID] = None):
-    engagement = await cache_manager.set_feed_engagement(user_id=jwt.user_id.hex, feed_id=feed_id.hex, comment_id=comment_id.hex, engagement_type=engagement_type)
+async def set_engagement(jwt: strictJwtDependency, engagement_type: EngagementType, feed_id: Optional[UUID] = None, comment_id: Optional[UUID] = None):
+    engagement = await cache_manager.set_feed_engagement(
+        user_id=jwt.user_id.hex,
+        feed_id=feed_id.hex if feed_id is not None else None,
+        comment_id=comment_id.hex if comment_id is not None else None,
+        engagement_type=engagement_type,
+    )
     my_logger.debug(f"engagement: {engagement}")
     return engagement
 
 
 @feed_router.post(path="/engagement/remove", response_model=EngagementSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
-async def remove_feed_engagement(jwt: strictJwtDependency, engagement_type: EngagementType, feed_id: Optional[UUID] = None, comment_id: Optional[UUID] = None):
-    engagement = await cache_manager.remove_feed_engagement(user_id=jwt.user_id.hex, feed_id=feed_id.hex, comment_id=comment_id.hex, engagement_type=engagement_type)
+async def remove_engagement(jwt: strictJwtDependency, engagement_type: EngagementType, feed_id: Optional[UUID] = None, comment_id: Optional[UUID] = None):
+    engagement = await cache_manager.remove_feed_engagement(
+        user_id=jwt.user_id.hex,
+        feed_id=feed_id.hex if feed_id is not None else None,
+        comment_id=comment_id.hex if comment_id is not None else None,
+        engagement_type=engagement_type,
+    )
     my_logger.debug(f"engagement: {engagement}")
     return engagement
 
@@ -285,3 +301,7 @@ async def validate_and_save_video(jwt: JWTCredential, video_file: UploadFile):
 
     finally:
         await cleanup_temp_files([temp_video_path, faststart_video_path])
+
+
+def validate_feed_create_fields():
+    pass
