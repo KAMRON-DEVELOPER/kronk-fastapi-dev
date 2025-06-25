@@ -55,6 +55,7 @@ class FeedModel(BaseModel):
     category_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("category_table.id"))
     category: Mapped[Optional["CategoryModel"]] = relationship(argument="CategoryModel", back_populates="categories")
     engagements: Mapped[list["EngagementModel"]] = relationship(argument="EngagementModel", back_populates="feed")
+    reports: Mapped[list["ReportModel"]] = relationship(argument="ReportModel", back_populates="feed")
     tag_links: Mapped[list["FeedTagLink"]] = relationship(back_populates="feed", overlaps="feeds, tags", cascade="all, delete-orphan")
     tags: Mapped[list["TagModel"]] = relationship(secondary="feed_tag_link_table", back_populates="feeds", overlaps="feed_links,feed,tag")
 

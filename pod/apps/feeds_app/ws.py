@@ -2,6 +2,7 @@ import asyncio
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from redis.asyncio.client import PubSub
+
 from settings.my_dependency import websocketDependency
 from settings.my_redis import cache_manager, pubsub_manager
 from settings.my_websocket import home_timeline_ws_manager
@@ -10,7 +11,7 @@ from utility.my_logger import my_logger
 feed_ws_router = APIRouter()
 
 
-@feed_ws_router.websocket("/timeline/home")
+@feed_ws_router.websocket("/timeline")
 async def home_timeline(websocket_dependency: websocketDependency):
     user_id = websocket_dependency.user_id.hex
     websocket = websocket_dependency.websocket

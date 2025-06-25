@@ -28,7 +28,7 @@ feed_router = APIRouter()
 settings = get_settings()
 
 
-@feed_router.post(path="/create", response_model=ResultSchema, status_code=201)
+@feed_router.post(path="/create", response_model=FeedSchema, response_model_exclude_defaults=True, response_model_exclude_none=True, status_code=201)
 async def create_feed_route(jwt: strictJwtDependency, session: DBSession,
                             body: Annotated[Optional[str], Form()] = None,
                             scheduled_at: Annotated[Optional[datetime], Form()] = None,
@@ -99,18 +99,23 @@ async def create_feed_route(jwt: strictJwtDependency, session: DBSession,
         await session.commit()
         await session.refresh(instance=feed, attribute_names=["id", "created_at", "updated_at", "author", "tags", "category"])
 
+        my_logger.debug("1 We reach there...")
+        my_logger.debug(f"feed.__dict__: {feed.__dict__}")
+        my_logger.debug(f"feed.__dir__(): {feed.__dir__()}")
         feed_schema = FeedSchema.model_validate(obj=feed)
+        my_logger.debug("2 We reach there...")
         mapping = feed_schema.model_dump(exclude_unset=True, exclude_defaults=True, exclude_none=True, mode="json")
         my_logger.debug(f"mapping: {mapping}")
-        await cache_manager.create_feed(author_id=jwt.user_id.hex, mapping=mapping)
 
-        if feed.feed_visibility in [FeedVisibility.public, FeedVisibility.followers]:
+        await cache_manager.create_feed(mapping=mapping, is_comment=True if parent_id is not None else False)
+
+        if feed.feed_visibility in [FeedVisibility.public, FeedVisibility.followers] and parent_id is None:
             await notify_followers_task.kiq(user_id=jwt.user_id.hex)
 
-        return {"ok": True}
+        return feed_schema
     except Exception as e:
         my_logger.exception(f"Exception while creating feed, e: {e}")
-        return {"ok": False}
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @feed_router.patch(path="/update", response_model=ResultSchema, status_code=200)
@@ -211,7 +216,7 @@ async def update_feed_route(jwt: strictJwtDependency, session: DBSession,
         return {"ok": False}
 
 
-@feed_router.delete(path="/delete", response_model=ResultSchema, status_code=204)
+@feed_router.delete(path="/delete", status_code=204)
 async def delete_feed_route(jwt: strictJwtDependency, feed_id: UUID, session: DBSession):
     feed: Optional[FeedModel] = await session.get(FeedModel, feed_id)
     if feed is None:
@@ -224,7 +229,6 @@ async def delete_feed_route(jwt: strictJwtDependency, feed_id: UUID, session: DB
     await session.delete(instance=feed)
     await session.commit()
     await cache_manager.delete_feed(author_id=jwt.user_id.hex, feed_id=feed_id.hex)
-    return {"ok": True}
 
 
 @feed_router.get(path="/timeline/discover", response_model=FeedResponseSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
@@ -260,7 +264,7 @@ async def user_timeline_route(jwt: strictJwtDependency, start: int = 0, end: int
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Server error occurred while creating feed.")
 
 
-@feed_router.post(path="/comments", response_model=FeedResponseSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
+@feed_router.get(path="/comments", response_model=FeedResponseSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
 async def get_comments(jwt: strictJwtDependency, feed_id: UUID, session: DBSession, start: int = 0, end: int = 10):
     try:
         stmt = (
@@ -269,12 +273,15 @@ async def get_comments(jwt: strictJwtDependency, feed_id: UUID, session: DBSessi
             .order_by(FeedModel.created_at.asc())
             .offset(start)
             .limit(end - start + 1)
-            .options(selectinload(FeedModel.author), selectinload(FeedModel.tags), selectinload(FeedModel.category)),
+            .options(selectinload(FeedModel.author), selectinload(FeedModel.tags), selectinload(FeedModel.category))
         )
         results = await session.scalars(stmt)
         comments: list[FeedModel] = results.all()
 
         end: int = await cache_manager.get_comments_count(feed_id=feed_id.hex)
+
+        my_logger.debug(f"comments: {comments}")
+        my_logger.debug(f"end: {end}")
 
         engagements: list[dict] = await asyncio.gather(*[cache_manager.get_engagement(user_id=jwt.user_id.hex, feed_id=comment.id.hex) for comment in comments])
         schemas: list[FeedSchema] = [FeedSchema.model_validate({**comment.__dict__, "engagement": engagement}) for comment, engagement in zip(comments, engagements)]

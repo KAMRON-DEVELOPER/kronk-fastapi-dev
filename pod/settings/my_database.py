@@ -4,7 +4,9 @@ from typing import Annotated, AsyncGenerator
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
-from apps.users_app.models import Base
+from apps.chats_app.models import GroupModel, GroupParticipantModel, GroupMessageModel, ChatModel, ChatParticipantModel, ChatMessageModel  # noqa
+from apps.feeds_app.models import FeedModel, TagModel, CategoryModel, ReportModel, EngagementModel  # noqa
+from apps.users_app.models import Base, UserModel  # noqa
 from settings.my_config import get_settings
 from utility.my_logger import my_logger
 

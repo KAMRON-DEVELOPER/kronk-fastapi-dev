@@ -167,9 +167,18 @@ class CacheManager:
 
     ''' ********************************************* FEED ********************************************* '''
 
-    async def create_feed(self, author_id: str, mapping: dict, max_dt: int = 360, max_ft: int = 120, max_ut: int = 120):
+    async def create_feed(self, mapping: dict, max_dt: int = 360, max_ft: int = 120, max_ut: int = 120, is_comment: bool = False):
         try:
+            author_id: str = mapping.get("author", {}).get("id", "")
             feed_id: str = mapping.get("id", "")
+
+            if is_comment:
+                parent_id: str = mapping.get("parent_id", "")
+                async with self.cache_redis.pipeline() as pipe:
+                    pipe.sadd(f"feeds:{parent_id}:comments", author_id)
+                    pipe.sadd(f"users:{author_id}:comments", feed_id)
+                    await pipe.execute()
+                return
 
             if "author" in mapping:
                 mapping.pop("author")
