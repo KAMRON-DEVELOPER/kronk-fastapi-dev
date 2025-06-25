@@ -14,7 +14,6 @@ class AuthorSchema(BaseModel):
     avatar_url: Optional[str]
 
     class Config:
-        from_attributes = True
         json_encoders = {UUID: lambda v: v.hex, datetime: lambda v: v.timestamp() if v is not None else None}
 
 
@@ -31,23 +30,13 @@ class EngagementSchema(BaseModel):
     viewed: Optional[bool] = None
     bookmarked: Optional[bool] = None
 
-    class Config:
-        from_attributes = True
-        json_encoders = {UUID: lambda v: v.hex, datetime: lambda v: v.timestamp() if v is not None else None}
-
 
 class CategorySchema(BaseModel):
     name: str
 
-    class Config:
-        from_attributes = True
-
 
 class TagSchema(BaseModel):
     name: str
-
-    class Config:
-        from_attributes = True
 
 
 class FeedSchema(BaseModel):
@@ -61,19 +50,11 @@ class FeedSchema(BaseModel):
     scheduled_at: Optional[datetime] = None
     feed_visibility: FeedVisibility
     comment_policy: CommentPolicy
-    engagement: Optional[EngagementSchema] = None
-    tags: list[TagSchema] = []
     category: Optional[CategorySchema] = None
-
-    class Config:
-        from_attributes = True
-        json_encoders = {UUID: lambda v: v.hex, datetime: lambda v: v.timestamp() if v is not None else None}
+    tags: list[TagSchema] = []
+    engagement: Optional[EngagementSchema] = None
 
 
 class FeedResponseSchema(BaseModel):
     feeds: list[FeedSchema]
     end: int
-
-    class Config:
-        from_attributes = True
-        json_encoders = {UUID: lambda v: v.hex, datetime: lambda v: v.timestamp() if v is not None else None}

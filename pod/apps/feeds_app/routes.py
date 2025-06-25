@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta, UTC
 from typing import Annotated, Optional
 from uuid import UUID
@@ -6,10 +7,12 @@ import aiofiles
 from fastapi import APIRouter, Form, HTTPException, UploadFile, status, File
 from ffmpeg.asyncio import FFmpeg
 from sqlalchemy import Result, select
+from sqlalchemy.orm import selectinload
 
 from apps.feeds_app.models import EngagementType, FeedModel, TagModel, CategoryModel
 from apps.feeds_app.schemas import FeedSchema, FeedResponseSchema, EngagementSchema
 from apps.feeds_app.tasks import notify_followers_task
+from apps.users_app.schemas import ResultSchema
 from settings.my_config import get_settings
 from settings.my_database import DBSession
 from settings.my_dependency import JWTCredential, strictJwtDependency, jwtDependency
@@ -25,16 +28,18 @@ feed_router = APIRouter()
 settings = get_settings()
 
 
-@feed_router.post(path="/create", status_code=201)
+@feed_router.post(path="/create", response_model=ResultSchema, status_code=201)
 async def create_feed_route(jwt: strictJwtDependency, session: DBSession,
                             body: Annotated[Optional[str], Form()] = None,
                             scheduled_at: Annotated[Optional[datetime], Form()] = None,
                             feed_visibility: Annotated[Optional[FeedVisibility], Form()] = None,
                             comment_policy: Annotated[Optional[CommentPolicy], Form()] = None,
-                            tags: Annotated[Optional[list[UUID]], Form()] = None,
+                            quote_id: Annotated[Optional[UUID], Form()] = None,
+                            parent_id: Annotated[Optional[UUID], Form()] = None,
                             category_id: Annotated[Optional[UUID], Form()] = None,
-                            image_files: Annotated[Optional[list[UploadFile]], File()] = None,
-                            video_file: Annotated[Optional[UploadFile], File()] = None):
+                            tags: Annotated[Optional[list[UUID]], Form()] = None,
+                            video_file: Annotated[Optional[UploadFile], File()] = None,
+                            image_files: Annotated[Optional[list[UploadFile]], File()] = None):
     try:
         if not body.strip():
             raise ValidationException(detail="body must be provided.")
@@ -49,12 +54,22 @@ async def create_feed_route(jwt: strictJwtDependency, session: DBSession,
             if scheduled_at > max_future:
                 raise ValidationException("Scheduled time cannot be more than 7 days in the future.")
 
-        feed = FeedModel(author_id=jwt.user_id, body=body, scheduled_at=scheduled_at, feed_visibility=feed_visibility, comment_policy=comment_policy, category_id=category_id)
+        feed = FeedModel(author_id=jwt.user_id, body=body, scheduled_at=scheduled_at, quote_id=quote_id, parent_id=parent_id)
+
+        if comment_policy is not None and comment_policy != CommentPolicy.everyone:
+            feed.comment_policy = comment_policy
+        if feed_visibility is not None and feed_visibility != FeedVisibility.public:
+            feed.feed_visibility = feed_visibility
+
+        session.add(instance=feed)
+        await session.commit()
+        await session.refresh(instance=feed)
 
         if category_id:
             category_exists: Optional[CategoryModel] = await session.scalar(select(CategoryModel).where(CategoryModel.id == category_id))
             if not category_exists:
                 raise HTTPException(status_code=400, detail="Invalid category ID.")
+            feed.category_id = category_exists.id
 
         if tags:
             tag_ids_in_db = await session.scalars(select(TagModel.id).where(TagModel.id.in_(tags)))
@@ -63,17 +78,8 @@ async def create_feed_route(jwt: strictJwtDependency, session: DBSession,
             if missing_tags:
                 raise NotFoundException(detail=f"Tag(s) not found: {', '.join(str(tag) for tag in missing_tags)}")
 
-        if tags:
             tags = await session.scalars(select(TagModel).where(TagModel.id.in_(tags)))
             feed.tags.extend(tags.all())
-
-        my_logger.debug(f"1 feed id: {feed.id}")
-
-        session.add(instance=feed)
-        await session.commit()
-        await session.refresh(instance=feed)
-
-        my_logger.debug(f"2 feed id: {feed.id}")
 
         if image_files:
             my_logger.debug(f"image_files: {image_files}")
@@ -92,33 +98,40 @@ async def create_feed_route(jwt: strictJwtDependency, session: DBSession,
 
         await session.commit()
         await session.refresh(instance=feed, attribute_names=["id", "created_at", "updated_at", "author", "tags", "category"])
-        my_logger.debug("it is raising when FeedSchema.model_validate(obj=feed)")
+
         feed_schema = FeedSchema.model_validate(obj=feed)
-
-        await notify_followers_task.kiq(user_id=jwt.user_id.hex)
-
         mapping = feed_schema.model_dump(exclude_unset=True, exclude_defaults=True, exclude_none=True, mode="json")
         my_logger.debug(f"mapping: {mapping}")
         await cache_manager.create_feed(author_id=jwt.user_id.hex, mapping=mapping)
 
-        return {"feed_id": feed.id}
+        if feed.feed_visibility in [FeedVisibility.public, FeedVisibility.followers]:
+            await notify_followers_task.kiq(user_id=jwt.user_id.hex)
+
+        return {"ok": True}
     except Exception as e:
         my_logger.exception(f"Exception while creating feed, e: {e}")
-        return {"feed_id": "I HATE YOU"}
+        return {"ok": False}
 
 
-@feed_router.patch(path="/update", status_code=200)
-async def update_feed_route(
-        _: strictJwtDependency,
-        session: DBSession,
-        feed_id: UUID,
-        body: Annotated[Optional[str], Form()] = None,
-        remove_image_targets: Annotated[Optional[list[str]], Form()] = None,
-        remove_video_target: Annotated[Optional[str], Form()] = None):
+@feed_router.patch(path="/update", response_model=ResultSchema, status_code=200)
+async def update_feed_route(jwt: strictJwtDependency, session: DBSession,
+                            feed_id: UUID,
+                            body: Annotated[Optional[str], Form()] = None,
+                            scheduled_at: Annotated[Optional[datetime], Form()] = None,
+                            feed_visibility: Annotated[Optional[FeedVisibility], Form()] = None,
+                            comment_policy: Annotated[Optional[CommentPolicy], Form()] = None,
+                            tags: Annotated[Optional[list[UUID]], Form()] = None,
+                            category_id: Annotated[Optional[UUID], Form()] = None,
+                            video_file: Annotated[Optional[UploadFile], File()] = None,
+                            image_files: Annotated[Optional[list[UploadFile]], File()] = None,
+                            remove_video_target: Annotated[Optional[str], Form()] = None,
+                            remove_image_targets: Annotated[Optional[list[str]], Form()] = None):
     try:
         my_logger.debug(f"body: {body}")
-        my_logger.debug(f"remove_image_targets: {remove_image_targets}")
+        my_logger.debug(f"video_file: {video_file.filename if video_file is not None else None}")
+        my_logger.debug(f"remove_image_targets: {len(image_files) if image_files else None}")
         my_logger.debug(f"remove_video_target: {remove_video_target}")
+        my_logger.debug(f"remove_image_targets: {remove_image_targets}")
 
         stmt = select(FeedModel).where(FeedModel.id == feed_id)
         result: Result = await session.execute(stmt)
@@ -127,32 +140,78 @@ async def update_feed_route(
             raise NotFoundException(detail="feed not found")
 
         if body is not None:
+            if not body.strip():
+                raise ValidationException(detail="body must be provided.")
+            if len(body) > 300:
+                raise ValidationException(detail="body is exceeded max 300 character limit.")
+
             if feed.body != body:
                 feed.body = body
                 await cache_manager.update_feed(feed_id=feed_id.hex, key="body", value=body)
 
-        if remove_image_targets and feed.image_urls:
-            for target in remove_image_targets:
-                if target in feed.image_urls:
-                    await remove_objects_from_minio([target])
-                    feed.image_urls.remove(target)
-            await cache_manager.update_feed(feed_id=feed_id.hex, key="image_urls", value=feed.image_urls)
+        now = datetime.now(UTC)
+        if scheduled_at is not None and feed.scheduled_at > now:
+            max_future = now + timedelta(days=7)
+            if scheduled_at < now:
+                raise ValidationException("Scheduled time cannot be in the past.")
+            if scheduled_at > max_future:
+                raise ValidationException("Scheduled time cannot be more than 7 days in the future.")
 
+        if feed_visibility is not None and feed.feed_visibility != feed_visibility:
+            feed.feed_visibility = feed_visibility
+            await cache_manager.update_feed(feed_id=feed.id.hex, key="feed_visibility", value=feed_visibility.value)
+
+        if comment_policy is not None and feed.comment_policy != comment_policy:
+            feed.comment_policy = comment_policy
+            await cache_manager.update_feed(feed_id=feed.id.hex, key="comment_policy", value=comment_policy.value)
+
+        if category_id:
+            category_exists: Optional[CategoryModel] = await session.scalar(select(CategoryModel).where(CategoryModel.id == category_id))
+            if not category_exists:
+                raise HTTPException(status_code=400, detail="Invalid category ID.")
+            feed.category_id = category_exists.id
+            await cache_manager.update_feed(feed_id=feed.id.hex, key="category_id", value=category_id)
+
+        if tags:
+            tag_ids_in_db = await session.scalars(select(TagModel.id).where(TagModel.id.in_(tags)))
+            found_tag_ids = set(tag_ids_in_db.all())
+            missing_tags = set(tags) - found_tag_ids
+            if missing_tags:
+                raise NotFoundException(detail=f"Tag(s) not found: {', '.join(str(tag) for tag in missing_tags)}")
+
+            db_tags = await session.scalars(select(TagModel).where(TagModel.id.in_(tags)))
+            feed.tags.extend(db_tags.all())
+            await cache_manager.update_feed(feed_id=feed.id.hex, key="tags", value=tags)
+
+        if remove_image_targets and feed.image_urls:
+            await remove_objects_from_minio([target for target in remove_image_targets if target in feed.image_urls])
         if remove_video_target and feed.video_url == remove_video_target:
             await remove_objects_from_minio([feed.video_url])
-            feed.video_url = None
-            await cache_manager.update_feed(feed_id=feed_id.hex, key="video_url", value=None)
+
+        if image_files:
+            my_logger.debug(f"image_files: {image_files}")
+            urls = await validate_and_save_images(jwt=jwt, image_files=image_files)
+            my_logger.debug(f"urls: {urls}")
+            if urls:
+                feed.image_urls = urls
+                await cache_manager.update_feed(feed_id=feed.id.hex, key="image_urls", value=urls)
+
+        if video_file:
+            my_logger.debug(f"video_file.filename: {video_file.filename}")
+            object_name = await validate_and_save_video(jwt=jwt, video_file=video_file)
+            my_logger.debug(f"object_name: {object_name}")
+            feed.video_url = object_name
+            await cache_manager.update_feed(feed_id=feed.id.hex, key="video_url", value=object_name)
 
         await session.commit()
 
         return {"ok": True}
-
     except Exception as e:
         my_logger.exception(f"Exception while creating post media, e: {e}")
         return {"ok": False}
 
 
-@feed_router.delete(path="/delete", status_code=204)
+@feed_router.delete(path="/delete", response_model=ResultSchema, status_code=204)
 async def delete_feed_route(jwt: strictJwtDependency, feed_id: UUID, session: DBSession):
     feed: Optional[FeedModel] = await session.get(FeedModel, feed_id)
     if feed is None:
@@ -165,6 +224,7 @@ async def delete_feed_route(jwt: strictJwtDependency, feed_id: UUID, session: DB
     await session.delete(instance=feed)
     await session.commit()
     await cache_manager.delete_feed(author_id=jwt.user_id.hex, feed_id=feed_id.hex)
+    return {"ok": True}
 
 
 @feed_router.get(path="/timeline/discover", response_model=FeedResponseSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
@@ -190,7 +250,7 @@ async def following_timeline_route(jwt: strictJwtDependency, start: int = 0, end
 
 
 @feed_router.get(path="/timeline/user", response_model=FeedResponseSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
-async def user_timeline_route(jwt: strictJwtDependency, start: int = 0, end: int = 19):
+async def user_timeline_route(jwt: strictJwtDependency, start: int = 0, end: int = 10):
     try:
         feeds = await cache_manager.get_user_timeline(user_id=jwt.user_id.hex, start=start, end=end)
         my_logger.debug(f"feeds: {feeds}")
@@ -200,26 +260,47 @@ async def user_timeline_route(jwt: strictJwtDependency, start: int = 0, end: int
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Server error occurred while creating feed.")
 
 
+@feed_router.post(path="/comments", response_model=FeedResponseSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
+async def get_comments(jwt: strictJwtDependency, feed_id: UUID, session: DBSession, start: int = 0, end: int = 10):
+    try:
+        stmt = (
+            select(FeedModel)
+            .where(FeedModel.parent_id == feed_id)
+            .order_by(FeedModel.created_at.asc())
+            .offset(start)
+            .limit(end - start + 1)
+            .options(selectinload(FeedModel.author), selectinload(FeedModel.tags), selectinload(FeedModel.category)),
+        )
+        results = await session.scalars(stmt)
+        comments: list[FeedModel] = results.all()
+
+        end: int = await cache_manager.get_comments_count(feed_id=feed_id.hex)
+
+        engagements: list[dict] = await asyncio.gather(*[cache_manager.get_engagement(user_id=jwt.user_id.hex, feed_id=comment.id.hex) for comment in comments])
+        schemas: list[FeedSchema] = [FeedSchema.model_validate({**comment.__dict__, "engagement": engagement}) for comment, engagement in zip(comments, engagements)]
+
+        # schemas = []
+        # for comment, engagement in zip(comments, engagements):
+        #     schema = FeedSchema.model_validate(comment)
+        #     schema.engagement = EngagementSchema(**engagement)
+        #     schemas.append(schema)
+
+        return {"feeds": schemas, "end": end}
+    except Exception as e:
+        my_logger.exception(f"Error fetching comments for feed {feed_id}: {e}")
+        raise HTTPException(status_code=500, detail="Error fetching comments")
+
+
 @feed_router.post(path="/engagement/set", response_model=EngagementSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
-async def set_engagement(jwt: strictJwtDependency, engagement_type: EngagementType, feed_id: Optional[UUID] = None, comment_id: Optional[UUID] = None):
-    engagement = await cache_manager.set_feed_engagement(
-        user_id=jwt.user_id.hex,
-        feed_id=feed_id.hex if feed_id is not None else None,
-        comment_id=comment_id.hex if comment_id is not None else None,
-        engagement_type=engagement_type,
-    )
+async def set_engagement(jwt: strictJwtDependency, feed_id: UUID, engagement_type: EngagementType):
+    engagement = await cache_manager.set_engagement(user_id=jwt.user_id.hex, feed_id=feed_id.hex, engagement_type=engagement_type, )
     my_logger.debug(f"engagement: {engagement}")
     return engagement
 
 
 @feed_router.post(path="/engagement/remove", response_model=EngagementSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
-async def remove_engagement(jwt: strictJwtDependency, engagement_type: EngagementType, feed_id: Optional[UUID] = None, comment_id: Optional[UUID] = None):
-    engagement = await cache_manager.remove_feed_engagement(
-        user_id=jwt.user_id.hex,
-        feed_id=feed_id.hex if feed_id is not None else None,
-        comment_id=comment_id.hex if comment_id is not None else None,
-        engagement_type=engagement_type,
-    )
+async def remove_engagement(jwt: strictJwtDependency, feed_id: UUID, engagement_type: EngagementType):
+    engagement = await cache_manager.remove_engagement(user_id=jwt.user_id.hex, feed_id=feed_id.hex, engagement_type=engagement_type)
     my_logger.debug(f"engagement: {engagement}")
     return engagement
 

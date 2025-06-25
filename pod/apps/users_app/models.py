@@ -11,14 +11,7 @@ from utility.my_enums import FollowPolicy, FollowStatus, UserRole, UserStatus
 
 if TYPE_CHECKING:
     from ..chats_app.models import ChatMessageModel, ChatModel, ChatParticipantModel, GroupMessageModel, GroupModel, GroupParticipantModel
-    from ..feeds_app.models import (
-        FeedCommentEngagementModel,
-        FeedCommentModel,
-        FeedEngagementModel,
-        FeedModel,
-        FeedReportModel,
-        RepostModel,
-    )
+    from ..feeds_app.models import EngagementModel, FeedModel, ReportModel
 
 
 class Base(DeclarativeBase):
@@ -74,11 +67,8 @@ class UserModel(BaseModel):
         argument="FollowModel", back_populates="follower", foreign_keys="[FollowModel.follower_id]", cascade="all, delete-orphan"
     )
     feeds: Mapped[list["FeedModel"]] = relationship(argument="FeedModel", back_populates="author")
-    reposts: Mapped[list["RepostModel"]] = relationship(argument="RepostModel", back_populates="user")
-    feed_comments: Mapped[list["FeedCommentModel"]] = relationship(argument="FeedCommentModel", back_populates="user")
-    feed_engagements: Mapped[list["FeedEngagementModel"]] = relationship(argument="FeedEngagementModel", back_populates="user")
-    feed_comment_engagements: Mapped[list["FeedCommentEngagementModel"]] = relationship(argument="FeedCommentEngagementModel", back_populates="user")
-    feed_reports: Mapped[list["FeedReportModel"]] = relationship(argument="FeedReportModel", back_populates="user")
+    engagements: Mapped[list["EngagementModel"]] = relationship(argument="EngagementModel", back_populates="user")
+    reports: Mapped[list["ReportModel"]] = relationship(argument="ReportModel", back_populates="user")
 
     group_participants: Mapped[list["GroupParticipantModel"]] = relationship(argument="GroupParticipantModel", back_populates="user", cascade="all, delete-orphan")
     groups: Mapped[list["GroupModel"]] = relationship(secondary="group_participant_table", back_populates="users", viewonly=True)

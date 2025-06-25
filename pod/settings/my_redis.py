@@ -136,12 +136,6 @@ class CacheManager:
 
     USER_TIMELINE_KEY = "user:{user_id}:user_timeline"
 
-    POST_META_KEY = "feed:{feed_id}:meta"
-    POST_LIKES_KEY = "feed:{feed_id}:likes"
-    POST_VIEWS_KEY = "feed:{feed_id}:views"
-    POST_REPOSTS_KEY = "feed:{feed_id}:reposts"
-    GLOBAL_TIMELINE_KEY = "global_timeline"
-
     ''' ****************************************** TIMELINE ****************************************** '''
 
     async def get_discover_timeline(self, user_id: Optional[str] = None, start: int = 0, end: int = 10) -> dict[str, list[dict] | int]:
@@ -171,7 +165,69 @@ class CacheManager:
         feeds: list[dict] = await self._get_feeds(user_id=user_id, feed_ids=feed_ids)
         return {"feeds": feeds, "end": total_count}
 
-    ''' ***************************************** INTERACTION ***************************************** '''
+    ''' ********************************************* FEED ********************************************* '''
+
+    async def create_feed(self, author_id: str, mapping: dict, max_dt: int = 360, max_ft: int = 120, max_ut: int = 120):
+        try:
+            feed_id: str = mapping.get("id", "")
+
+            if "author" in mapping:
+                mapping.pop("author")
+
+            if "image_urls" in mapping and isinstance(mapping["image_urls"], list):
+                mapping["image_urls"] = json.dumps(mapping["image_urls"])
+
+            # inject author_id to mapping
+            mapping["author_id"] = author_id
+
+            followers: set[str] = await self.cache_redis.smembers(f"users:{author_id}:followers")
+
+            created_at = mapping.get("created_at", time.time())
+            initial_score = calculate_score({"comments": 0, "reposts": 0, "quotes": 0, "likes": 0, "views": 0, "bookmarks": 0}, created_at)
+
+            async with self.cache_redis.pipeline() as pipe:
+                pipe.hset(name=f"feeds:{feed_id}:meta", mapping=mapping)
+
+                pipe.zadd(name="global_timeline", mapping={feed_id: initial_score})
+                pipe.zremrangebyrank(name="global_timeline", min=0, max=-max_dt - 1)
+
+                for follower_id in followers:
+                    pipe.lpush(f"users:{follower_id}:following_timeline", feed_id)
+                    pipe.ltrim(name=f"users:{follower_id}:following_timeline", start=0, end=-max_ft - 1)
+
+                pipe.lpush(f"users:{author_id}:user_timeline", feed_id)
+                pipe.ltrim(name=f"users:{author_id}:user_timeline", start=0, end=max_ut - 1)
+
+                await pipe.execute()
+        except Exception as e:
+            my_logger.error(f"Exceptions while creating feed: {e}")
+            raise ValueError(f"Exceptions while creating feed: {e}")
+
+    async def update_feed(self, feed_id: str, key: str, value: Any):
+        if value is None:
+            await self.cache_redis.hdel(f"feeds:{feed_id}:meta", key)
+            return
+        else:
+            if isinstance(value, list):
+                value = json.dumps(value)
+            await self.cache_redis.hset(name=f"feeds:{feed_id}:meta", key=key, value=value)
+            return
+
+    async def delete_feed(self, author_id: str, feed_id: str):
+        follower_ids: set[str] = await self.get_followers(user_id=author_id)
+
+        async with self.cache_redis.pipeline() as pipe:
+            pipe.zrem("global_timeline", feed_id)
+
+            for follower_id in follower_ids:
+                pipe.lrem(name=f"users:{follower_id}:following_timeline", count=0, value=feed_id)
+
+            pipe.lrem(name=f"users:{author_id}:user_timeline", count=0, value=feed_id)
+
+            keys = [f"feeds:{feed_id}:{suffix}" for suffix in ["meta", "comments", "reposts", "quotes", "likes", "views", "bookmarks"]]
+            pipe.delete(*keys)
+
+            await pipe.execute()
 
     async def _get_feeds(self, feed_ids: list[str], user_id: Optional[str] = None) -> list[dict]:
         feeds: list[dict] = []
@@ -239,43 +295,40 @@ class CacheManager:
 
         return feeds
 
-    async def set_feed_engagement(self, user_id: str, engagement_type: EngagementType, feed_id: Optional[str] = None, comment_id: Optional[str] = None):
-        entity_type = "feeds" if feed_id else "comments"
-        entity_id = feed_id or comment_id
-        action_key = f"{entity_type}:{entity_id}:{engagement_type.value}"
-        user_key = f"users:{user_id}:{'comments' if comment_id else 'feeds'}:{engagement_type.value}"
+    ''' ***************************************** INTERACTION ***************************************** '''
+
+    async def set_engagement(self, user_id: str, feed_id: str, engagement_type: EngagementType):
+        engagement_key = f"feeds:{feed_id}:{engagement_type.value}"
+        user_key = f"users:{user_id}:{engagement_type.value}"
 
         async with self.cache_redis.pipeline() as pipe:
-            pipe.sadd(action_key, user_id)
-            pipe.sadd(user_key, entity_id)
+            pipe.sadd(engagement_key, user_id)
+            pipe.sadd(user_key, feed_id)
             await pipe.execute()
 
-            return await self.get_engagement(user_id=user_id, entity_type=entity_type, entity_id=entity_id)
+            return await self.get_engagement(user_id=user_id, feed_id=feed_id)
 
-    async def remove_feed_engagement(self, user_id: str, engagement_type: EngagementType, feed_id: Optional[str] = None, comment_id: Optional[str] = None):
-        entity_type = "feeds" if feed_id else "comments"
-        entity_id = feed_id or comment_id
-        action_key = f"{entity_type}:{entity_id}:{engagement_type.value}"
-        user_key = f"users:{user_id}:{'comments' if comment_id else ''}:{engagement_type.value}"
+    async def remove_engagement(self, user_id: str, feed_id: str, engagement_type: EngagementType):
+        engagement_key = f"feeds:{feed_id}:{engagement_type.value}"
+        user_key = f"users:{user_id}:{engagement_type.value}"
 
         async with self.cache_redis.pipeline() as pipe:
-            pipe.srem(action_key, user_id)
-            pipe.srem(user_key, entity_id)
+            pipe.srem(engagement_key, user_id)
+            pipe.srem(user_key, feed_id)
             await pipe.execute()
 
-        return await self.get_engagement(user_id=user_id, entity_type=entity_type, entity_id=entity_id)
+        return await self.get_engagement(user_id=user_id, feed_id=feed_id)
 
-    async def get_engagement(self, user_id: str, entity_type: str, entity_id: str):
-        # Define keys
+    async def get_engagement(self, user_id: str, feed_id: str):
         engagement_keys = ["comments", "reposts", "quotes", "likes", "views", "bookmarks"]
         interaction_keys = ["reposted", "quoted", "liked", "viewed", "bookmarked"]
 
         async with self.cache_redis.pipeline() as pipe:
             for key in engagement_keys:
-                pipe.scard(f"{entity_type}:{entity_id}:{key}")
+                pipe.scard(f"feeds:{feed_id}:{key}")
 
             for key in engagement_keys[1:]:
-                pipe.sismember(f"{entity_type}:{entity_id}:{key}", user_id)
+                pipe.sismember(f"feeds:{feed_id}:{key}", user_id)
 
             results = await pipe.execute()
 
@@ -288,70 +341,6 @@ class CacheManager:
         engagement.update({interaction_key: True for interaction_key, interacted in zip(interaction_keys, interaction_results) if interacted})
 
         return engagement
-
-    ''' ********************************************* FEED ********************************************* '''
-
-    async def create_feed(self, author_id: str, mapping: dict, max_dt: int = 360, max_ft: int = 120, max_ut: int = 120):
-        try:
-            feed_id: str = mapping.get("id", "")
-
-            if "author" in mapping:
-                mapping.pop("author")
-
-            if "image_urls" in mapping and isinstance(mapping["image_urls"], list):
-                mapping["image_urls"] = json.dumps(mapping["image_urls"])
-
-            # inject author_id to mapping
-            mapping["author_id"] = author_id
-
-            followers: set[str] = await self.cache_redis.smembers(f"users:{author_id}:followers")
-
-            created_at = mapping.get("created_at", time.time())
-            initial_score = calculate_score({"comments": 0, "reposts": 0, "quotes": 0, "likes": 0, "views": 0, "bookmarks": 0}, created_at)
-
-            async with self.cache_redis.pipeline() as pipe:
-                pipe.hset(name=f"feeds:{feed_id}:meta", mapping=mapping)
-
-                pipe.zadd(name="global_timeline", mapping={feed_id: initial_score})
-                pipe.zremrangebyrank(name="global_timeline", min=0, max=-max_dt - 1)
-
-                for follower_id in followers:
-                    pipe.lpush(f"users:{follower_id}:following_timeline", feed_id)
-                    pipe.ltrim(name=f"users:{follower_id}:following_timeline", start=0, end=-max_ft - 1)
-
-                pipe.lpush(f"users:{author_id}:user_timeline", feed_id)
-                pipe.ltrim(name=f"users:{author_id}:user_timeline", start=0, end=max_ut - 1)
-
-                await pipe.execute()
-        except Exception as e:
-            my_logger.error(f"Exceptions while creating feed: {e}")
-            raise ValueError(f"Exceptions while creating feed: {e}")
-
-    async def update_feed(self, feed_id: str, key: str, value: Any):
-        if value is None:
-            await self.cache_redis.hdel(f"feeds:{feed_id}:meta", key)
-            return
-        else:
-            if isinstance(value, list):
-                value = json.dumps(value)
-            await self.cache_redis.hset(name=f"feeds:{feed_id}:meta", key=key, value=value)
-            return
-
-    async def delete_feed(self, author_id: str, feed_id: str):
-        follower_ids: set[str] = await self.get_followers(user_id=author_id)
-
-        async with self.cache_redis.pipeline() as pipe:
-            pipe.zrem("global_timeline", feed_id)
-
-            for follower_id in follower_ids:
-                pipe.lrem(name=f"users:{follower_id}:following_timeline", count=0, value=feed_id)
-
-            pipe.lrem(name=f"users:{author_id}:user_timeline", count=0, value=feed_id)
-
-            keys = [f"feeds:{feed_id}:{suffix}" for suffix in ["meta", "comments", "reposts", "quotes", "likes", "views", "bookmarks"]]
-            pipe.delete(*keys)
-
-            await pipe.execute()
 
     ''' ********************************************* USER ********************************************* '''
 
@@ -521,6 +510,9 @@ class CacheManager:
         return [document.properties for document in results.documents]
 
     ''' ****************************************** HELPER FUNCTIONS ****************************************** '''
+
+    async def get_comments_count(self, feed_id: str):
+        return await self.cache_redis.scard(name=f"feeds:{feed_id}:comments")
 
     async def incr_statistics(self):
         today_date = date.today().isoformat()

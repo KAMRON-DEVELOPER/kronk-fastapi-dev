@@ -1,8 +1,8 @@
 """Initial migration
 
-Revision ID: 5f272f954c8b
+Revision ID: 52503215475e
 Revises: 
-Create Date: 2025-06-23 11:03:28.597255
+Create Date: 2025-06-25 16:43:48.296605
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '5f272f954c8b'
+revision: str = '52503215475e'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -73,7 +73,7 @@ def upgrade() -> None:
     sa.Column('message', sa.Text(), nullable=True),
     sa.Column('image_urls', sa.ARRAY(sa.String()), nullable=True),
     sa.Column('video_urls', sa.ARRAY(sa.String()), nullable=True),
-    sa.Column('scheduled_time', sa.TIMESTAMP(timezone=True), nullable=True),
+    sa.Column('scheduled_at', sa.TIMESTAMP(timezone=True), nullable=True),
     sa.Column('read_at', sa.TIMESTAMP(timezone=True), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('created_at', sa.TIMESTAMP(timezone=True), nullable=False),
@@ -95,22 +95,23 @@ def upgrade() -> None:
     sa.UniqueConstraint('user_id', 'chat_id', name='uq_user_chat')
     )
     op.create_table('feed_table',
-    sa.Column('author_id', sa.UUID(), nullable=False),
     sa.Column('body', sa.String(length=200), nullable=False),
-    sa.Column('image_urls', sa.ARRAY(sa.String(), dimensions=4), nullable=True),
+    sa.Column('author_id', sa.UUID(), nullable=False),
     sa.Column('video_url', sa.String(length=255), nullable=True),
-    sa.Column('scheduled_time', sa.TIMESTAMP(), nullable=True),
-    sa.Column('display_dislikes', sa.Boolean(), nullable=False),
-    sa.Column('comment_policy', sa.Enum('everyone', 'followers', name='comment_policy'), nullable=False),
+    sa.Column('image_urls', sa.ARRAY(sa.String(), dimensions=4), nullable=True),
+    sa.Column('scheduled_at', sa.TIMESTAMP(), nullable=True),
     sa.Column('feed_visibility', sa.Enum('public', 'followers', 'private', 'archived', name='feed_visibility'), nullable=False),
+    sa.Column('comment_policy', sa.Enum('everyone', 'followers', name='comment_policy'), nullable=False),
+    sa.Column('quote_id', sa.UUID(), nullable=True),
+    sa.Column('parent_id', sa.UUID(), nullable=True),
     sa.Column('category_id', sa.UUID(), nullable=True),
-    sa.Column('quoted_feed_id', sa.UUID(), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('created_at', sa.TIMESTAMP(timezone=True), nullable=False),
     sa.Column('updated_at', sa.TIMESTAMP(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['author_id'], ['user_table.id'], ),
     sa.ForeignKeyConstraint(['category_id'], ['category_table.id'], ),
-    sa.ForeignKeyConstraint(['quoted_feed_id'], ['feed_table.id'], ),
+    sa.ForeignKeyConstraint(['parent_id'], ['feed_table.id'], ),
+    sa.ForeignKeyConstraint(['quote_id'], ['feed_table.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('follow_table',
@@ -140,22 +141,7 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('name', name='uq_group_name')
     )
-    op.create_table('feed_comment_table',
-    sa.Column('user_id', sa.UUID(), nullable=False),
-    sa.Column('feed_id', sa.UUID(), nullable=False),
-    sa.Column('parent_id', sa.UUID(), nullable=True),
-    sa.Column('body', sa.String(length=200), nullable=False),
-    sa.Column('image_urls', sa.ARRAY(sa.String(), dimensions=4), nullable=True),
-    sa.Column('video_url', sa.String(length=255), nullable=True),
-    sa.Column('id', sa.UUID(), nullable=False),
-    sa.Column('created_at', sa.TIMESTAMP(timezone=True), nullable=False),
-    sa.Column('updated_at', sa.TIMESTAMP(timezone=True), nullable=False),
-    sa.ForeignKeyConstraint(['feed_id'], ['feed_table.id'], ),
-    sa.ForeignKeyConstraint(['parent_id'], ['feed_comment_table.id'], ),
-    sa.ForeignKeyConstraint(['user_id'], ['user_table.id'], ),
-    sa.PrimaryKeyConstraint('id')
-    )
-    op.create_table('feed_engagement_table',
+    op.create_table('engagement_table',
     sa.Column('user_id', sa.UUID(), nullable=False),
     sa.Column('feed_id', sa.UUID(), nullable=False),
     sa.Column('engagement_type', sa.Enum('reposts', 'quotes', 'likes', 'views', 'bookmarks', name='engagement_type'), nullable=False),
@@ -165,19 +151,7 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['feed_id'], ['feed_table.id'], ),
     sa.ForeignKeyConstraint(['user_id'], ['user_table.id'], ),
     sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('user_id', 'feed_id', name='uq_feed_engagement')
-    )
-    op.create_table('feed_report_table',
-    sa.Column('user_id', sa.UUID(), nullable=False),
-    sa.Column('feed_id', sa.UUID(), nullable=False),
-    sa.Column('report_reason', sa.Enum('copyright_infringement', 'spam', 'nudity_or_sexual_content', 'misinformation', 'harassment_or_bullying', 'hate_speech', 'violence_or_threats', 'self_harm_or_suicide', 'impersonation', 'other', name='report_reason'), nullable=False),
-    sa.Column('id', sa.UUID(), nullable=False),
-    sa.Column('created_at', sa.TIMESTAMP(timezone=True), nullable=False),
-    sa.Column('updated_at', sa.TIMESTAMP(timezone=True), nullable=False),
-    sa.ForeignKeyConstraint(['feed_id'], ['feed_table.id'], ),
-    sa.ForeignKeyConstraint(['user_id'], ['user_table.id'], ),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('user_id', 'feed_id', name='uq_feed_report')
+    sa.UniqueConstraint('user_id', 'feed_id', 'engagement_type', name='uq_feed_engagement')
     )
     op.create_table('feed_tag_link_table',
     sa.Column('feed_id', sa.UUID(), nullable=False),
@@ -195,7 +169,7 @@ def upgrade() -> None:
     sa.Column('message', sa.Text(), nullable=True),
     sa.Column('image_urls', sa.ARRAY(sa.String()), nullable=True),
     sa.Column('video_urls', sa.ARRAY(sa.String()), nullable=True),
-    sa.Column('scheduled_time', sa.TIMESTAMP(timezone=True), nullable=True),
+    sa.Column('scheduled_at', sa.TIMESTAMP(timezone=True), nullable=True),
     sa.Column('read_at', sa.TIMESTAMP(timezone=True), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('created_at', sa.TIMESTAMP(timezone=True), nullable=False),
@@ -217,27 +191,17 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('user_id', 'group_id', 'id'),
     sa.UniqueConstraint('user_id', 'group_id', name='uq_user_group')
     )
-    op.create_table('repost_table',
+    op.create_table('report_table',
     sa.Column('user_id', sa.UUID(), nullable=False),
     sa.Column('feed_id', sa.UUID(), nullable=False),
+    sa.Column('report_reason', sa.Enum('copyright_infringement', 'spam', 'nudity_or_sexual_content', 'misinformation', 'harassment_or_bullying', 'hate_speech', 'violence_or_threats', 'self_harm_or_suicide', 'impersonation', 'other', name='report_reason'), nullable=False),
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('created_at', sa.TIMESTAMP(timezone=True), nullable=False),
     sa.Column('updated_at', sa.TIMESTAMP(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['feed_id'], ['feed_table.id'], ),
     sa.ForeignKeyConstraint(['user_id'], ['user_table.id'], ),
-    sa.PrimaryKeyConstraint('id')
-    )
-    op.create_table('feed_comment_engagement_table',
-    sa.Column('user_id', sa.UUID(), nullable=False),
-    sa.Column('feed_comment_id', sa.UUID(), nullable=False),
-    sa.Column('engagement_type', sa.Enum('reposts', 'quotes', 'likes', 'views', 'bookmarks', name='engagement_type'), nullable=False),
-    sa.Column('id', sa.UUID(), nullable=False),
-    sa.Column('created_at', sa.TIMESTAMP(timezone=True), nullable=False),
-    sa.Column('updated_at', sa.TIMESTAMP(timezone=True), nullable=False),
-    sa.ForeignKeyConstraint(['feed_comment_id'], ['feed_comment_table.id'], ),
-    sa.ForeignKeyConstraint(['user_id'], ['user_table.id'], ),
     sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('user_id', 'feed_comment_id', name='uq_feed_comment_engagement')
+    sa.UniqueConstraint('user_id', 'feed_id', 'report_reason', name='uq_feed_report')
     )
     # ### end Alembic commands ###
 
@@ -245,14 +209,11 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Downgrade schema."""
     # ### commands auto generated by Alembic - please adjust! ###
-    op.drop_table('feed_comment_engagement_table')
-    op.drop_table('repost_table')
+    op.drop_table('report_table')
     op.drop_table('group_participant_table')
     op.drop_table('group_message_table')
     op.drop_table('feed_tag_link_table')
-    op.drop_table('feed_report_table')
-    op.drop_table('feed_engagement_table')
-    op.drop_table('feed_comment_table')
+    op.drop_table('engagement_table')
     op.drop_table('group_table')
     op.drop_table('follow_table')
     op.drop_table('feed_table')
