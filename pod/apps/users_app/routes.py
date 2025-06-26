@@ -3,7 +3,7 @@ from typing import Optional
 from uuid import UUID
 
 from bcrypt import checkpw, gensalt, hashpw
-from fastapi import APIRouter, HTTPException, UploadFile, status
+from fastapi import APIRouter, HTTPException, UploadFile
 from firebase_admin.auth import UserRecord
 from sqlalchemy import select
 
@@ -24,7 +24,7 @@ from apps.users_app.schemas import (
 from apps.users_app.tasks import add_follow_to_db, delete_follow_from_db, notify_settings_stats, send_email_task
 from services.firebase_service import validate_firebase_token
 from settings.my_database import DBSession
-from settings.my_dependency import create_jwt_token, headerTokenDependency, strictJwtDependency
+from settings.my_dependency import create_jwt_token, headerTokenDependency, strictJwtDependency, jwtDependency
 from settings.my_exceptions import AlreadyExistException, HeaderTokenException, NotFoundException, ValidationException
 from settings.my_minio import put_object_to_minio, remove_objects_from_minio, wipe_objects_from_minio
 from settings.my_redis import cache_manager
@@ -93,7 +93,7 @@ async def verify_route(htd: headerTokenDependency, schema: VerifySchema, session
 @users_router.post(path="/auth/login", response_model=ProfileTokenSchema, status_code=200)
 async def login_route(schema: LoginSchema, session: DBSession):
     # 1. Try from cache
-    search_results = await cache_manager.search_user_by_username(username_query=schema.username, limit=1)
+    search_results = await cache_manager.search_user(username_query=schema.username, limit=1)
     my_logger.debug(f"user_search_results: {search_results}")
     if len(search_results) > 0:
         user_data: dict = search_results.pop()
@@ -127,7 +127,7 @@ async def logout_route(jwt: strictJwtDependency, session: DBSession):
     return {"ok": True}
 
 
-@users_router.post(path="/auth/request-forgot-password", response_model=ForgotPasswordTokenSchema, status_code=status.HTTP_200_OK)
+@users_router.post(path="/auth/request-forgot-password", response_model=ForgotPasswordTokenSchema, status_code=200)
 async def request_forgot_password_route(schema: RequestForgotPasswordSchema, session: DBSession):
     stmt = select(UserModel).where(UserModel.email == schema.email)
     result = await session.execute(stmt)
@@ -144,7 +144,7 @@ async def request_forgot_password_route(schema: RequestForgotPasswordSchema, ses
     return {"forgot_password_token": forgot_password_token, "forgot_password_token_expiration_date": forgot_password_token_expiration_date}
 
 
-@users_router.post(path="/auth/forgot-password", response_model=ProfileTokenSchema, status_code=status.HTTP_200_OK)
+@users_router.post(path="/auth/forgot-password", response_model=ProfileTokenSchema, status_code=200)
 async def forgot_password_route(schema: ResetPasswordSchema, htd: headerTokenDependency, session: DBSession):
     if not htd.forgot_password_token:
         raise HeaderTokenException(detail="Reset password token is missing in the headers.")
@@ -229,7 +229,7 @@ async def get_profile_route(jwt: strictJwtDependency, session: DBSession):
     return await cache_profile(user=user)
 
 
-@users_router.patch(path="/profile/update", response_model=ResultSchema, status_code=status.HTTP_200_OK)
+@users_router.patch(path="/profile/update", response_model=ResultSchema, status_code=200)
 async def update_profile_route(jwt: strictJwtDependency, session: DBSession, schema: ProfileUpdateSchema):
     user: Optional[UserModel] = await session.get(UserModel, jwt.user_id)
     if not user:
@@ -360,21 +360,6 @@ async def delete_profile_route(jwt: strictJwtDependency, session: DBSession):
     return {"ok": True}
 
 
-@users_router.get(path="/search", status_code=200)
-async def user_search(jwt: strictJwtDependency, query: str, offset: int = 0, limit: int = 50):
-    try:
-        user_id = jwt.user_id.hex
-        users = await cache_manager.search_user_by_username(username_query=query, user_id=user_id, offset=offset, limit=limit)
-        my_logger.debug(f"users: {users}")
-        return users
-    except ValueError as value_error:
-        my_logger.error(f"ValueError in user_search: {value_error}")
-        raise HTTPException(status_code=400, detail=f"{value_error}")
-    except Exception as exception:
-        my_logger.critical(f"Exception in user_search: {exception}")
-        raise HTTPException(status_code=500, detail="🤯 WTF? Something just exploded on our end. Try again later!")
-
-
 @users_router.post(path="/follow", response_model=ResultSchema, status_code=200)
 async def follow_route(jwt: strictJwtDependency, following_id: UUID):
     if jwt.user_id == following_id:
@@ -408,18 +393,28 @@ async def get_followings_route(jwt: strictJwtDependency):
     return await cache_manager.get_following(user_id=jwt.user_id.hex)
 
 
-@users_router.post(path="/auth/access", response_model=TokenSchema, status_code=status.HTTP_200_OK)
+@users_router.post(path="/auth/access", response_model=TokenSchema, status_code=200)
 async def refresh_access_token_route(jwt: strictJwtDependency):
     access_token: str = create_jwt_token(subject={"id": jwt.user_id.hex})
     return {"access_token": access_token}
 
 
-@users_router.post(path="/auth/refresh", response_model=TokenSchema, status_code=status.HTTP_200_OK)
+@users_router.post(path="/auth/refresh", response_model=TokenSchema, status_code=200)
 async def refresh_refresh_token_route(jwt: strictJwtDependency):
     subject = {"id": jwt.user_id.hex}
     access_token = create_jwt_token(subject=subject)
     refresh_token = create_jwt_token(subject=subject, for_refresh=True)
     return {"access_token": access_token, "refresh_token": refresh_token}
+
+
+@users_router.get(path="/search", status_code=200)
+async def user_search(jwt: jwtDependency, query: str, offset: int = 0, limit: int = 20):
+    try:
+        users = await cache_manager.search_user(username_query=query, user_id=jwt.user_id.hex if jwt is not None else None, offset=offset, limit=limit)
+        return users
+    except Exception as exception:
+        my_logger.critical(f"Exception in user_search: {exception}")
+        raise HTTPException(status_code=500, detail="🤯 WTF? Something just exploded on our end. Try again later!")
 
 
 def generate_token(user_id: str) -> dict:

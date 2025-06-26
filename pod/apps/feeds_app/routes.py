@@ -4,7 +4,7 @@ from typing import Annotated, Optional
 from uuid import UUID
 
 import aiofiles
-from fastapi import APIRouter, Form, HTTPException, UploadFile, status, File
+from fastapi import APIRouter, Form, HTTPException, UploadFile, File
 from ffmpeg.asyncio import FFmpeg
 from sqlalchemy import Result, select
 from sqlalchemy.orm import selectinload
@@ -99,15 +99,11 @@ async def create_feed_route(jwt: strictJwtDependency, session: DBSession,
         await session.commit()
         await session.refresh(instance=feed, attribute_names=["id", "created_at", "updated_at", "author", "tags", "category"])
 
-        my_logger.debug("1 We reach there...")
-        my_logger.debug(f"feed.__dict__: {feed.__dict__}")
-        my_logger.debug(f"feed.__dir__(): {feed.__dir__()}")
         feed_schema = FeedSchema.model_validate(obj=feed)
-        my_logger.debug("2 We reach there...")
         mapping = feed_schema.model_dump(exclude_unset=True, exclude_defaults=True, exclude_none=True, mode="json")
         my_logger.debug(f"mapping: {mapping}")
 
-        await cache_manager.create_feed(mapping=mapping, is_comment=True if parent_id is not None else False)
+        await cache_manager.create_feed(mapping=mapping)
 
         if feed.feed_visibility in [FeedVisibility.public, FeedVisibility.followers] and parent_id is None:
             await notify_followers_task.kiq(user_id=jwt.user_id.hex)
@@ -235,33 +231,30 @@ async def delete_feed_route(jwt: strictJwtDependency, feed_id: UUID, session: DB
 async def discover_timeline_route(jwt: jwtDependency, start: int = 0, end: int = 10):
     try:
         feeds = await cache_manager.get_discover_timeline(user_id=jwt.user_id.hex if jwt is not None else None, start=start, end=end)
-        my_logger.debug(f"feeds: {feeds}")
         return feeds
     except Exception as e:
-        print(f"Exception in get_global_timeline: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Exception in get_global_timeline: {e}")
+        print(f"Exception in discover_timeline_route: {e}")
+        raise HTTPException(status_code=400, detail=f"Exception in discover_timeline_route: {e}")
 
 
 @feed_router.get(path="/timeline/following", response_model=FeedResponseSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
 async def following_timeline_route(jwt: strictJwtDependency, start: int = 0, end: int = 10):
     try:
         feeds = await cache_manager.get_following_timeline(user_id=jwt.user_id.hex, start=start, end=end)
-        my_logger.debug(f"feeds: {feeds}")
         return feeds
     except Exception as e:
-        my_logger.critical(f"Exception in get_home_timeline_route: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Exception in get_home_timeline_route: {e}")
+        my_logger.critical(f"Exception in following_timeline_route: {e}")
+        raise HTTPException(status_code=400, detail=f"Exception in following_timeline_route: {e}")
 
 
 @feed_router.get(path="/timeline/user", response_model=FeedResponseSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
 async def user_timeline_route(jwt: strictJwtDependency, start: int = 0, end: int = 10):
     try:
         feeds = await cache_manager.get_user_timeline(user_id=jwt.user_id.hex, start=start, end=end)
-        my_logger.debug(f"feeds: {feeds}")
         return feeds
     except Exception as e:
         my_logger.debug(f"Exception in user_timeline route: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Server error occurred while creating feed.")
+        raise HTTPException(status_code=500, detail="Server error occurred while creating feed.")
 
 
 @feed_router.get(path="/comments", response_model=FeedResponseSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
@@ -278,19 +271,13 @@ async def get_comments(jwt: strictJwtDependency, feed_id: UUID, session: DBSessi
         results = await session.scalars(stmt)
         comments: list[FeedModel] = results.all()
 
+        my_logger.debug(f"comments: {comments}, comments[0].__dict__: {comments[0].__dict__}")
+        my_logger.debug(f"comments: {comments}, comments[0].author.username: {comments[0].author.username}")
+
         end: int = await cache_manager.get_comments_count(feed_id=feed_id.hex)
-
-        my_logger.debug(f"comments: {comments}")
         my_logger.debug(f"end: {end}")
-
-        engagements: list[dict] = await asyncio.gather(*[cache_manager.get_engagement(user_id=jwt.user_id.hex, feed_id=comment.id.hex) for comment in comments])
+        engagements: list[dict] = await asyncio.gather(*[cache_manager.get_engagement(user_id=jwt.user_id.hex, feed_id=comment.id.hex, is_comment=True) for comment in comments])
         schemas: list[FeedSchema] = [FeedSchema.model_validate({**comment.__dict__, "engagement": engagement}) for comment, engagement in zip(comments, engagements)]
-
-        # schemas = []
-        # for comment, engagement in zip(comments, engagements):
-        #     schema = FeedSchema.model_validate(comment)
-        #     schema.engagement = EngagementSchema(**engagement)
-        #     schemas.append(schema)
 
         return {"feeds": schemas, "end": end}
     except Exception as e:
@@ -299,34 +286,26 @@ async def get_comments(jwt: strictJwtDependency, feed_id: UUID, session: DBSessi
 
 
 @feed_router.post(path="/engagement/set", response_model=EngagementSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
-async def set_engagement(jwt: strictJwtDependency, feed_id: UUID, engagement_type: EngagementType):
-    engagement = await cache_manager.set_engagement(user_id=jwt.user_id.hex, feed_id=feed_id.hex, engagement_type=engagement_type, )
+async def set_engagement(jwt: strictJwtDependency, feed_id: UUID, engagement_type: EngagementType, is_comment: bool = False):
+    engagement = await cache_manager.set_engagement(user_id=jwt.user_id.hex, feed_id=feed_id.hex, engagement_type=engagement_type, is_comment=is_comment)
     my_logger.debug(f"engagement: {engagement}")
     return engagement
 
 
 @feed_router.post(path="/engagement/remove", response_model=EngagementSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
-async def remove_engagement(jwt: strictJwtDependency, feed_id: UUID, engagement_type: EngagementType):
-    engagement = await cache_manager.remove_engagement(user_id=jwt.user_id.hex, feed_id=feed_id.hex, engagement_type=engagement_type)
+async def remove_engagement(jwt: strictJwtDependency, feed_id: UUID, engagement_type: EngagementType, is_comment: bool = False):
+    engagement = await cache_manager.remove_engagement(user_id=jwt.user_id.hex, feed_id=feed_id.hex, engagement_type=engagement_type, is_comment=is_comment)
     my_logger.debug(f"engagement: {engagement}")
     return engagement
 
 
-@feed_router.get(path="/search", status_code=status.HTTP_200_OK)
-async def feed_search(_: strictJwtDependency, query: str, offset: int = 0, limit: int = 50):
+@feed_router.get(path="/search", status_code=200)
+async def feed_search(query: str, offset: int = 0, limit: int = 20):
     try:
-        feeds = await cache_manager.search_feed_by_body(body_query=query, offset=offset, limit=limit)
-        my_logger.debug(f"feeds: {feeds}")
-        return feeds
-    except ValueError as value_error:
-        my_logger.error(f"ValueError in feed_search: {value_error}")
-        raise HTTPException(status_code=400, detail=f"{value_error}")
+        return await cache_manager.search_feed(query=query, offset=offset, limit=limit)
     except Exception as exception:
         my_logger.critical(f"Exception in feed_search: {exception}")
         raise HTTPException(status_code=500, detail="🤯 WTF? Something just exploded on our end. Try again later!")
-
-
-# ********************************************** HELPER FUNCTIONS ************************************************
 
 
 async def cleanup_temp_files(paths: list):
