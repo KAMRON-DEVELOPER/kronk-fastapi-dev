@@ -97,3 +97,15 @@ class MemberType(Enum):
     administrator = auto()
     moderator = auto()
     regular = auto()
+
+
+class RoomType(Enum):
+    in_home = auto()
+    in_room = auto()
+
+
+class ChatEventType(Enum):
+    chat_created = auto()
+    message_sent = auto()
+    typing = auto()
+    presence = auto()

@@ -14,7 +14,7 @@ from coredis.modules.search import Field
 from redis.asyncio import Redis as CacheRedis
 from redis.asyncio.client import PubSub
 
-from apps.chats_app.schemas import ChatTileSchema
+from apps.chats_app.schemas import ChatTileSchema, ParticipantSchema, ChatTileResponseSchema
 from settings.my_config import get_settings
 from utility.my_enums import EngagementType
 from utility.my_logger import my_logger
@@ -85,48 +85,70 @@ class ChatCacheManager:
         self.cache_redis = cache_redis
         self.search_redis = search_redis
 
-    async def add_connection_to_room(self, user_id: str):
-        await self.cache_redis.sadd(f"chat_home:{user_id}")
+    async def add_user_to_room(self, user_id: str, chat_id: Optional[str] = None):
+        suffix: str = "home" if chat_id is None else f"room:{chat_id}"
+        await self.cache_redis.sadd(f"chats:{suffix}", user_id)
 
-    async def remove_connection_from_room(self, user_id: str):
-        await self.cache_redis.sadd(f"chat_home:{user_id}")
+    async def remove_user_from_room(self, user_id: str, chat_id: Optional[str] = None):
+        suffix: str = "home" if chat_id is None else f"room:{chat_id}"
+        await self.cache_redis.srem(f"chats:{suffix}", user_id)
 
-    async def add_typing(self, user_id: str, chat_room_id: str):
-        await self.cache_redis.sadd(f"typing:{chat_room_id}:{user_id}")
+    async def add_typing(self, user_id: str, chat_id: str):
+        await self.cache_redis.sadd(f"typing:{chat_id}", user_id)
 
-    async def create_chat_tile(self, user_id: str, chat_id: str, mapping: dict):
-        key = f"chat_tile:{chat_id}:{user_id}"
-        await self.cache_redis.hset(key, mapping=mapping)
+    async def remove_typing(self, user_id: str, chat_id: str):
+        await self.cache_redis.srem(f"typing:{chat_id}", user_id)
 
-    async def get_chat_tiles(self, user_id: str) -> list[ChatTileSchema]:
+    async def create_chat_tile(self, mapping: dict):
+        chat_id = mapping.get("chat_id", "")
+        user_id = mapping.get("user_id", "")
+        if not chat_id or not user_id:
+            raise ValueError("chat_id and user_id must be present in mapping.")
+        await self.cache_redis.hset(name=f"chat_tile:{chat_id}", mapping=mapping)
+
+    async def get_chat_tiles(self, user_id: str) -> ChatTileResponseSchema:
         chat_ids = await self.cache_redis.smembers(f"users:{user_id}:chats")
+        my_logger.debug(f"chat_ids: {chat_ids}")
+        if not chat_ids:
+            return ChatTileResponseSchema(chat_tiles=[], end=0)
 
-        chats: list[dict] = await asyncio.gather(*[self.cache_redis.hgetall(name=f"chats:{chat_id}") for chat_id in chat_ids])
-        return [
-            ChatTileSchema(
-                chat_id=chat["id"],
-                user_id=chat["user_id"],
-                name="",
-                avatar_url="",
-                last_activity_at=datetime.now(),
-                last_message="",
-                last_message_seen=True,
-                specified_name="",
-                unread_count=0,
-            )
-            for chat in chats
+        async with self.cache_redis.pipeline() as pipe:
+            for chat_id in chat_ids:
+                pipe.hgetall(f"chats:{chat_id}")
+            chats: list[dict] = await pipe.execute()
+            my_logger.debug(f"chats: {chats}")
+
+        participant_ids = [chat.get('author_id') for chat in chats if chat]
+        my_logger.debug(f"participant_ids: {participant_ids}")
+        if not participant_ids:
+            return ChatTileResponseSchema(chat_tiles=[], end=0)
+
+        async with self.cache_redis.pipeline() as pipe:
+            for pid in participant_ids:
+                pipe.hgetall(f"users:{pid}:profile")
+            participants: list[dict] = await pipe.execute()
+            my_logger.debug(f"participants: {participants}")
+
+        statuses: list[bool] = (await self.cache_redis.smismember("chats:home", *participant_ids) if participant_ids else [])
+        my_logger.debug(f"statuses: {statuses}")
+
+        if not (len(chats) == len(participants) == len(statuses)):
+            raise RuntimeError("Data mismatch while resolving chat tiles")
+
+        chat_tiles = [
+            ChatTileSchema(**chat, participant=ParticipantSchema(**participant, is_online=status))
+            for chat, participant, status in zip(chats, participants, statuses)
         ]
+
+        end = len(chat_ids)
+        return ChatTileResponseSchema(chat_tiles=chat_tiles, end=end)
 
     async def delete_chat_tile(self, user_id: str, chat_id: str):
         await self.cache_redis.srem(f"users:{user_id}:chats", chat_id)
-        await self.cache_redis.delete(f"chat_tile:{chat_id}:{user_id}")
+        await self.cache_redis.hdel(name=f"chats:{chat_id}")
 
     async def set_chat(self, user_id: str, chat_id: str):
         await self.cache_redis.sadd(f"users:{user_id}:chats", chat_id)
-
-    async def delete_chat(self, user_id: str, chat_id: str):
-        await self.cache_redis.srem(f"users:{user_id}:chats", chat_id)
-        await self.cache_redis.delete(f"chat_tile:{chat_id}:{user_id}")
 
 
 class CacheManager:

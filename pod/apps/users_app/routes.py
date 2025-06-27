@@ -93,7 +93,7 @@ async def verify_route(htd: headerTokenDependency, schema: VerifySchema, session
 @users_router.post(path="/auth/login", response_model=ProfileTokenSchema, status_code=200)
 async def login_route(schema: LoginSchema, session: DBSession):
     # 1. Try from cache
-    search_results = await cache_manager.search_user(username_query=schema.username, limit=1)
+    search_results = await cache_manager.search_user(query=schema.username, limit=1)
     my_logger.debug(f"user_search_results: {search_results}")
     if len(search_results) > 0:
         user_data: dict = search_results.pop()
