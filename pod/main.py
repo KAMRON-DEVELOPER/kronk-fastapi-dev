@@ -4,7 +4,6 @@ import taskiq_fastapi
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from firebase_admin import credentials, initialize_app
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from apps.admin_app.routes import admin_router
@@ -14,6 +13,7 @@ from apps.chats_app.ws import chat_ws_router
 from apps.feeds_app.routes import feed_router
 from apps.feeds_app.ws import feed_ws_router
 from apps.users_app.routes import users_router
+from services.firebase_service import initialize_firebase
 from settings.my_config import get_settings
 from settings.my_database import initialize_db
 from settings.my_exceptions import ApiException
@@ -28,6 +28,7 @@ settings = get_settings()
 async def app_lifespan(_app: FastAPI):
     await initialize_redis_indexes()
     await initialize_db()
+    initialize_firebase()
     instrumentator.expose(_app)
     if not broker.is_worker_process:
         print("Starting broker")
@@ -68,15 +69,6 @@ async def validation_exception_handler(request: Request, exception: RequestValid
 
     my_logger.warning(f"HTTP validation error during {request.method} {request.url.path}, details: {details}")
     return JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"details": details})
-
-
-try:
-    cred = credentials.Certificate(cert="/run/secrets/FIREBASE_ADMINSDK_PROD" if settings.DEBUG else settings.FIREBASE_ADMINSDK_DEV)
-    default_app = initialize_app(credential=cred)
-    my_logger.debug(f"default_app.project_id: {default_app.project_id}")
-    my_logger.debug(f"default_app.project_id: {default_app.name}")
-except Exception as e:
-    print(f"initialization error: {e}")
 
 
 @app.get(path="/", tags=["root"])

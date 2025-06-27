@@ -271,8 +271,9 @@ async def get_comments(jwt: strictJwtDependency, feed_id: UUID, session: DBSessi
         results = await session.scalars(stmt)
         comments: list[FeedModel] = results.all()
 
-        my_logger.debug(f"comments: {comments}, comments[0].__dict__: {comments[0].__dict__}")
-        my_logger.debug(f"comments: {comments}, comments[0].author.username: {comments[0].author.username}")
+        if comments:
+            my_logger.debug(f"comments: {comments}, comments[0].__dict__: {comments[0].__dict__}")
+            my_logger.debug(f"comments: {comments}, comments[0].author.username: {comments[0].author.username}")
 
         end: int = await cache_manager.get_comments_count(feed_id=feed_id.hex)
         my_logger.debug(f"end: {end}")

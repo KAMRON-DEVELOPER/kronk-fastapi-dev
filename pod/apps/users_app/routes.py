@@ -189,8 +189,7 @@ async def google_auth_route(htd: headerTokenDependency, session: DBSession):
     user: Optional[UserModel] = result.scalar_one_or_none()
 
     if user is not None:
-        await cache_profile(user=user)
-        return generate_token(user_id=user.id.hex)
+        return await cache_profile(user=user)
 
     username: str = generate_unique_username(base_name=f"{firebase_user.display_name}")
     password_string: str = generate_password_string()
@@ -410,7 +409,7 @@ async def refresh_refresh_token_route(jwt: strictJwtDependency):
 @users_router.get(path="/search", status_code=200)
 async def user_search(jwt: jwtDependency, query: str, offset: int = 0, limit: int = 20):
     try:
-        users = await cache_manager.search_user(username_query=query, user_id=jwt.user_id.hex if jwt is not None else None, offset=offset, limit=limit)
+        users = await cache_manager.search_user(query=query, user_id=jwt.user_id.hex if jwt is not None else None, offset=offset, limit=limit)
         return users
     except Exception as exception:
         my_logger.critical(f"Exception in user_search: {exception}")

@@ -564,9 +564,9 @@ class CacheManager:
         email_results: SearchResult = await self.search_redis.search.search(index=USER_INDEX_NAME, query=f"@email:{email_query}", offset=0, limit=1)
         return username_results.total > 0, email_results.total > 0
 
-    async def search_user(self, username_query: str, user_id: Optional[str] = None, offset: int = 0, limit: int = 20):
+    async def search_user(self, query: str, user_id: Optional[str] = None, offset: int = 0, limit: int = 20):
         try:
-            username = escape_redisearch_special_chars(username_query)
+            username = escape_redisearch_special_chars(query)
             results: SearchResult = await self.search_redis.search.search(index=USER_INDEX_NAME, query=f"@username:{username}*", offset=offset, limit=limit)
             my_logger.debug(f"search_user results.documents: {results.documents}, count: {results.total}")
 
@@ -584,8 +584,8 @@ class CacheManager:
             my_logger.error(f"Search error: {str(e)}")
             return []
 
-    async def search_feed(self, body_query: str, offset: int = 0, limit: int = 20):
-        results: SearchResult = await self.search_redis.search.search(index=feed_INDEX_NAME, query=f"@body:{body_query}*", offset=offset, limit=limit)
+    async def search_feed(self, query: str, offset: int = 0, limit: int = 20):
+        results: SearchResult = await self.search_redis.search.search(index=feed_INDEX_NAME, query=f"@body:{query}*", offset=offset, limit=limit)
         my_logger.debug(f"search_feed results.documents: {results.documents}, count: {results.total}")
 
         return [document.properties for document in results.documents]

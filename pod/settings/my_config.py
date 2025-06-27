@@ -1,8 +1,9 @@
-import os
 from functools import lru_cache
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+DEBUG = 0
 
 
 class Settings(BaseSettings):
@@ -51,20 +52,22 @@ class Settings(BaseSettings):
     AZURE_TRANSLATOR_REGION: str = ""
     AZURE_TRANSLATOR_ENDPOINT: str = ""
 
-    FIREBASE_ADMINSDK_DEV: dict = {
-        "type": FIREBASE_TYPE,
-        "project_id": FIREBASE_PROJECT_ID,
-        "private_key_id": FIREBASE_PRIVATE_KEY_ID,
-        "private_key": FIREBASE_PRIVATE_KEY,
-        "client_email": FIREBASE_CLIENT_EMAIL,
-        "client_id": FIREBASE_CLIENT_ID,
-        "auth_uri": FIREBASE_AUTH_URI,
-        "token_uri": FIREBASE_TOKEN_URI,
-        "auth_provider_x509_cert_url": FIREBASE_AUTH_PROVIDER_X509_CERT_URI,
-        "client_x509_cert_url": FIREBASE_CLIENT_CERT_URL,
-    }
+    @property
+    def firebase_adminsdk_dev(self) -> dict:
+        return {
+            "type": self.FIREBASE_TYPE,
+            "project_id": self.FIREBASE_PROJECT_ID,
+            "private_key_id": self.FIREBASE_PRIVATE_KEY_ID,
+            "private_key": self.FIREBASE_PRIVATE_KEY,  # replace("\\n", "\n")
+            "client_email": self.FIREBASE_CLIENT_EMAIL,
+            "client_id": self.FIREBASE_CLIENT_ID,
+            "auth_uri": self.FIREBASE_AUTH_URI,
+            "token_uri": self.FIREBASE_TOKEN_URI,
+            "auth_provider_x509_cert_url": self.FIREBASE_AUTH_PROVIDER_X509_CERT_URI,
+            "client_x509_cert_url": self.FIREBASE_CLIENT_CERT_URL,
+        }
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore", secrets_dir="/run/secrets" if not int(os.getenv("DEBUG", "1")) else None)
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore", secrets_dir="/run/secrets" if not bool(DEBUG) else None)
 
 
 @lru_cache

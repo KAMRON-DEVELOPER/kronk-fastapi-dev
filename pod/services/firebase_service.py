@@ -1,9 +1,23 @@
 import asyncio
 from functools import partial
 
-from firebase_admin import auth
+from firebase_admin import auth, credentials, initialize_app
 from firebase_admin.auth import UserRecord
+
+from settings.my_config import get_settings
 from settings.my_exceptions import NotFoundException, ValidationException
+from utility.my_logger import my_logger
+
+settings = get_settings()
+
+
+def initialize_firebase():
+    try:
+        cred = credentials.Certificate(cert="/run/secrets/FIREBASE_ADMINSDK_PROD" if not settings.DEBUG else settings.firebase_adminsdk_dev)
+        default_app = initialize_app(credential=cred)
+        my_logger.debug(f"firebase default_app.project_id: {default_app.project_id}, default_app.name: {default_app.name}")
+    except Exception as e:
+        my_logger.exception(f"initialization error: {e}")
 
 
 async def validate_firebase_token(firebase_id_token: str) -> UserRecord:
@@ -22,5 +36,5 @@ async def validate_firebase_token(firebase_id_token: str) -> UserRecord:
         raise ValidationException("🔥 Invalid Firebase ID token.")
     except auth.UserNotFoundError:
         raise NotFoundException("🔥 User not found in Firebase.")
-    except Exception as e:
-        raise ValidationException(f"🔥 Firebase token validation failed: {e}")
+    except Exception as exception:
+        raise ValidationException(f"🔥 Firebase token validation failed: {exception}")
