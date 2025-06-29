@@ -1,7 +1,7 @@
-import asyncio
 import json
 import math
 import time
+from asyncio import Task
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 from uuid import uuid4
@@ -61,7 +61,7 @@ async def initialize_redis_indexes() -> None:
 class RedisPubSubManager:
     def __init__(self, cache_redis: CacheRedis):
         self.cache_redis = cache_redis
-        self.tasks: dict[str, asyncio.Task] = {}
+        self.tasks: dict[str, Task] = {}
 
     async def publish(self, topic: str, data: dict):
         await self.cache_redis.publish(channel=topic, message=json.dumps(data))
@@ -72,7 +72,7 @@ class RedisPubSubManager:
             await pubsub.subscribe(topic)
             return pubsub
         except Exception as exception:
-            raise ValueError(f"🌋 Exception while subscribing: {exception}")
+            raise ValueError(f"Exception while subscribing: {exception}")
 
     async def unsubscribe(self, topic: str):
         if topic in self.tasks:
@@ -85,13 +85,19 @@ class ChatCacheManager:
         self.cache_redis = cache_redis
         self.search_redis = search_redis
 
-    async def add_user_to_room(self, user_id: str, chat_id: Optional[str] = None):
-        suffix: str = "home" if chat_id is None else f"room:{chat_id}"
-        await self.cache_redis.sadd(f"chats:{suffix}", user_id)
+    async def add_user_to_room(self, user_id: str) -> set[str]:
+        async with self.cache_redis.pipeline() as pipe:
+            pipe.sadd(f"chats:online", user_id)
+            pipe.smembers(name=f"users:{user_id}:chats")
+            results = await pipe.execute()
+        return results[1]
 
-    async def remove_user_from_room(self, user_id: str, chat_id: Optional[str] = None):
-        suffix: str = "home" if chat_id is None else f"room:{chat_id}"
-        await self.cache_redis.srem(f"chats:{suffix}", user_id)
+    async def remove_user_from_room(self, user_id: str):
+        async with self.cache_redis.pipeline() as pipe:
+            pipe.srem(f"chats:online", user_id)
+            pipe.smembers(name=f"users:{user_id}:chats")
+            results = await pipe.execute()
+        return results[1]
 
     async def add_typing(self, user_id: str, chat_id: str):
         await self.cache_redis.sadd(f"typing:{chat_id}", user_id)

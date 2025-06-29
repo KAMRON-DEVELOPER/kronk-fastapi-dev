@@ -92,20 +92,24 @@ class GroupType(AutoName):
     private = auto()
 
 
-class MemberType(Enum):
+class MemberType(AutoName):
     owner = auto()
     administrator = auto()
     moderator = auto()
     regular = auto()
 
 
-class RoomType(Enum):
+class RoomType(AutoName):
     in_home = auto()
     in_room = auto()
 
 
-class ChatEventType(Enum):
-    chat_created = auto()
-    message_sent = auto()
-    typing = auto()
-    presence = auto()
+class ChatEvent(AutoName):
+    typing_start = auto()
+    typing_stop = auto()
+    goes_online = auto()
+    goes_offline = auto()
+    enter_chat = auto()
+    exit_chat = auto()
+    created_chat = auto()
+    sent_message = auto()
