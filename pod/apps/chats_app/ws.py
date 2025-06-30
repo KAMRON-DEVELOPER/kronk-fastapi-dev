@@ -1,5 +1,4 @@
 import asyncio
-from typing import Optional
 
 from fastapi import APIRouter, WebSocket
 from redis.asyncio.client import PubSub
@@ -40,7 +39,7 @@ async def chat_connect(user_id: str, websocket: WebSocket):
     await chat_ws_manager.connect(user_id=user_id, websocket=websocket)
     participant_ids: set[str] = await chat_cache_manager.add_user_to_room(user_id=user_id)
     data = {"type": ChatEvent.goes_online.value, "participant_id": user_id}
-    tasks = [pubsub_manager.publish(topic=f"chats:home:{participant_id}", data=data) for participant_id in participant_ids]
+    tasks = [pubsub_manager.publish(topic=f"chats:home:{pid}", data=data) for pid in participant_ids]
     await asyncio.gather(*tasks)
 
 
@@ -48,7 +47,7 @@ async def chat_disconnect(user_id: str, websocket: WebSocket):
     await chat_ws_manager.disconnect(user_id=user_id, websocket=websocket)
     participant_ids: set[str] = await chat_cache_manager.remove_user_from_room(user_id)
     data = {"type": ChatEvent.goes_offline.value, "participant_id": user_id}
-    tasks = [pubsub_manager.publish(topic=f"chats:home:{participant_id}", data=data) for participant_id in participant_ids]
+    tasks = [pubsub_manager.publish(topic=f"chats:home:{pid}", data=data) for pid in participant_ids]
     await asyncio.gather(*tasks)
 
 
@@ -57,49 +56,43 @@ async def chat_pubsub_generator(user_id: str) -> PubSub:
 
 
 # Event handlers
-async def handle_goes_online(data: dict[str, str]):
-    participant_id: Optional[str] = data.get("participant_id")
-    my_logger.debug(f'User {participant_id} came online')
-    # Add custom logic here
+async def handle_goes_online(user_id: str, data: dict[str, str]):
+    my_logger.debug(f"User {data.get('participant_id')} came online")
+    await chat_ws_manager.send_personal_message(user_id=user_id, data=data)
 
 
-async def handle_goes_offline(data: dict):
-    participant_id = data["participant_id"]
-    my_logger.debug(f'User {participant_id} went offline')
-    # Add custom logic here
+async def handle_goes_offline(user_id: str, data: dict):
+    my_logger.debug(f"User {data.get('participant_id')} went offline")
+    await chat_ws_manager.send_personal_message(user_id=user_id, data=data)
 
 
-async def handle_typing_start(data: dict):
-    chat_id = data["chat_id"]
-    my_logger.debug(f'User started typing in {chat_id}')
-    # Add custom logic here
+async def handle_typing_start(user_id: str, data: dict):
+    my_logger.debug(f"User started typing in {data.get('chat_id')}")
+    await chat_ws_manager.send_personal_message(user_id=user_id, data=data)
 
 
-async def handle_typing_stop(data: dict):
-    chat_id = data["chat_id"]
-    my_logger.debug(f'User stopped typing in {chat_id}')
-    # Add custom logic here
+async def handle_typing_stop(user_id: str, data: dict):
+    my_logger.debug(f"User stopped typing in {data.get('chat_id')}")
+    await chat_ws_manager.send_personal_message(user_id=user_id, data=data)
 
 
-async def handle_enter_chat(data: dict):
-    chat_id: Optional[str] = data.get("chat_id")
-    my_logger.debug(f'User entered to {chat_id} room')
-    # Add custom logic here
+async def handle_enter_chat(user_id: str, data: dict):
+    my_logger.debug(f"User entered to {data.get('chat_id')} room")
+    await chat_ws_manager.send_personal_message(user_id=user_id, data=data)
 
 
-async def handle_exit_chat(data: dict):
-    chat_id: Optional[str] = data.get("chat_id")
-    my_logger.debug(f'User exited from {chat_id} room')
-    # Add custom logic here
+async def handle_exit_chat(user_id: str, data: dict):
+    my_logger.debug(f"User exited from {data.get('chat_id')} room")
+    await chat_ws_manager.send_personal_message(user_id=user_id, data=data)
 
 
-async def handle_sent_message(data: dict):
-    chat_id: Optional[str] = data.get("chat_id")
-    my_logger.debug(f'User sent message from {chat_id}')
-    # Add custom logic hereA
+async def handle_sent_message(user_id: str, data: dict):
+    my_logger.debug(f"User sent message from {data.get('chat_id')} room")
+    await chat_ws_manager.send_personal_message(user_id=user_id, data=data)
 
 
-async def handle_created_chat(data: dict):
-    chat_id: Optional[str] = data.get("chat_id")
-    my_logger.debug(f'User stopped typing in {chat_id}')
-    # Add custom logic here
+async def handle_created_chat(user_id: str, data: dict):
+    participant_id = data.get("participant_id")
+    chat_id = data.get("chat_id")
+    my_logger.debug(f"User {participant_id} created a chat room (ID: {chat_id}) with you ({user_id})")
+    await chat_ws_manager.send_personal_message(user_id=user_id, data=data)

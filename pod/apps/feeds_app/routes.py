@@ -300,10 +300,10 @@ async def remove_engagement(jwt: strictJwtDependency, feed_id: UUID, engagement_
     return engagement
 
 
-@feed_router.get(path="/search", status_code=200)
-async def feed_search(query: str, offset: int = 0, limit: int = 20):
+@feed_router.get(path="/search", response_model=FeedResponseSchema, status_code=200)
+async def feed_search(jwt: jwtDependency, query: str, offset: int = 0, limit: int = 20):
     try:
-        return await cache_manager.search_feed(query=query, offset=offset, limit=limit)
+        return await cache_manager.search_feed(query=query, user_id=jwt.user_id.hex if jwt.user_id is not None else None, offset=offset, limit=limit)
     except Exception as exception:
         my_logger.critical(f"Exception in feed_search: {exception}")
         raise HTTPException(status_code=500, detail="🤯 WTF? Something just exploded on our end. Try again later!")

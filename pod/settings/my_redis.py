@@ -90,7 +90,6 @@ class ChatCacheManager:
             pipe.sadd(f"chats:online", user_id)
             pipe.smembers(name=f"users:{user_id}:chats")
             results = await pipe.execute()
-        my_logger.debug(f"results in add_user_to_room: {results}")
         return results[1]
 
     async def remove_user_from_room(self, user_id: str):
@@ -98,7 +97,6 @@ class ChatCacheManager:
             pipe.srem(f"chats:online", user_id)
             pipe.smembers(name=f"users:{user_id}:chats")
             results = await pipe.execute()
-        my_logger.debug(f"results in remove_user_from_room: {results}")
         return results[1]
 
     async def add_typing(self, user_id: str, chat_id: str):
@@ -614,11 +612,15 @@ class CacheManager:
             my_logger.error(f"Search error: {str(e)}")
             return []
 
-    async def search_feed(self, query: str, offset: int = 0, limit: int = 20):
+    async def search_feed(self, query: str, user_id: Optional[str] = None, offset: int = 0, limit: int = 20):
         results: SearchResult = await self.search_redis.search.search(index=feed_INDEX_NAME, query=f"@body:{query}*", offset=offset, limit=limit)
         my_logger.debug(f"search_feed results.documents: {results.documents}, count: {results.total}")
 
-        return [document.properties for document in results.documents]
+        feed_ids = [str(document.id).split(":")[1] for document in results.documents]
+        my_logger.debug(f"feed_ids: {feed_ids}")
+
+        feeds = await self._get_feeds(user_id=user_id, feed_ids=feed_ids)
+        return {"feeds": feeds, "end": results.total}
 
     ''' ****************************************** HELPER FUNCTIONS ****************************************** '''
 

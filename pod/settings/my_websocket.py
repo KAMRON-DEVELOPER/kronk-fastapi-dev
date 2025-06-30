@@ -9,7 +9,6 @@ from fastapi.websockets import WebSocketState
 from redis.asyncio import Redis
 from redis.asyncio.client import PubSub
 
-from settings.my_exceptions import ApiException
 from settings.my_redis import my_cache_redis, pubsub_manager
 from utility.my_enums import ChatEvent
 from utility.my_logger import my_logger
@@ -61,18 +60,19 @@ class WebSocketManager:
                 my_logger.debug("Anonymous WebSocket disconnected")
 
         except Exception as exception:
-            my_logger.exception("Exception while disconnecting the websocket connection: {exception}")
+            my_logger.exception(f"Exception while disconnecting the websocket connection: {exception}")
             raise ValueError(f"Exception while disconnecting the websocket connection: {exception}")
 
     async def send_personal_message(self, user_id: str, data: dict):
         ws: Optional[WebSocket] = self.authorized_connections.get(user_id)
         if ws is None:
-            raise ApiException(status_code=400, detail="Connection not found.")
+            my_logger.exception(f"Websocket connection not exists with {user_id}")
 
         try:
             await ws.send_json(data=data)
         except Exception as exception:
-            raise ValueError(f"🌋 Exception while sending personal message: {exception}")
+            my_logger.exception(f"Exception while sending personal message: {exception}")
+            raise ValueError(f"Exception while sending personal message: {exception}")
 
     async def broadcast(self, data: dict, user_ids: Optional[list[str]] = None):
         targets = [self.authorized_connections[uid] for uid in user_ids if uid in self.authorized_connections] if user_ids else self.unauthorized_connections
@@ -93,7 +93,7 @@ class WebSocketContextManager:
             connect_handler: Callable[[str, WebSocket], Awaitable[None]],
             disconnect_handler: Callable[[str, WebSocket], Awaitable[None]],
             pubsub_generator: Callable[[str], Awaitable[PubSub]],
-            message_handlers: dict[ChatEvent, Callable[[dict], Awaitable[None]]],
+            message_handlers: dict[ChatEvent, Callable[[str, dict], Awaitable[None]]],
             user_id: Optional[str] = None,
     ):
         self.websocket = websocket
@@ -186,19 +186,19 @@ class WebSocketContextManager:
                     await self.websocket.send_json({"detail": f"Invalid event type: '{event_type}'."})
                     continue
 
-                handler: Optional[Callable[[dict], Awaitable[None]]] = self.message_handlers.get(chat_event)
+                handler: Optional[Callable[[str, dict], Awaitable[None]]] = self.message_handlers.get(chat_event)
                 if handler is None:
                     my_logger.warning(f"No handler registered for event type: '{event_type}'")
                     await self.websocket.send_json({"detail": f"No handler for event type: '{event_type}'."})
                     continue
 
                 try:
-                    await handler(data)
+                    await handler(self.user_id, data)
                 except Exception as e:
                     my_logger.exception(f"Error while handling event '{event_type}': {e}")
                     await self.websocket.send_json({"detail": f"An error occurred while handling event: '{event_type}'."})
         except asyncio.CancelledError:
-            my_logger.exception("PubSub listener cancelled")
+            my_logger.debug("PubSub listener cancelled")
         except Exception as e:
             my_logger.exception(f"Unexpected error in pubsub listener: {e}")
 
@@ -206,7 +206,6 @@ class WebSocketContextManager:
         """Receive incoming WebSocket messages and handle heartbeat checks."""
         last_activity = time.time()
         received_json: Optional[dict] = None
-        chat_event: Optional[ChatEvent] = None
 
         try:
             while self.websocket.client_state == WebSocketState.CONNECTED:
@@ -233,20 +232,28 @@ class WebSocketContextManager:
                     my_logger.warning(f"Invalid message: {e}")
                     continue
 
-                event_type = received_json.get("type")
-                if not event_type:
+                event_type: Optional[str] = received_json.get("type")
+                if event_type is None:
                     await self.websocket.send_json({"detail": "Missing event type."})
                     continue
 
+                if event_type == "heartbeat":
+                    await self.websocket.send_json({"type": "heartbeat_ack"})
+                    continue
+
                 try:
-                    chat_event = ChatEvent(event_type)
+                    ChatEvent(event_type)
                 except ValueError:
                     my_logger.exception(f"Invalid event type received: '{event_type}'")
                     await self.websocket.send_json({"detail": f"Invalid event type: '{event_type}'."})
                     continue
 
-                data = {"type": chat_event.value, "participant_id": self.user_id, "message": received_json}
-                await pubsub_manager.publish(topic=f"chats:home:{self.user_id}", data=data)
+                if "participant_id" not in received_json:
+                    my_logger.exception("Participant ID is required.")
+                    await self.websocket.send_json({"detail": "Participant ID is required."})
+                    continue
+
+                await pubsub_manager.publish(topic=f"chats:home:{self.user_id}", data=received_json)
         except asyncio.CancelledError:
             my_logger.debug("WebSocket receiver cancelled")
         except Exception as e:
