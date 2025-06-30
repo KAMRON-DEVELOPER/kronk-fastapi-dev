@@ -1,9 +1,11 @@
 import asyncio
 import json
+import time
 from asyncio import Task
 from typing import Optional, Callable, Awaitable
 
 from fastapi import WebSocket, WebSocketDisconnect
+from fastapi.websockets import WebSocketState
 from redis.asyncio import Redis
 from redis.asyncio.client import PubSub
 
@@ -46,19 +48,21 @@ class WebSocketManager:
                 self.unauthorized_connections.append(websocket)
                 my_logger.debug("Anonymous WebSocket connected")
         except Exception as exception:
+            my_logger.exception("Exception while accepting the websocket connection: {exception}")
             raise ValueError(f"Exception while accepting the websocket connection: {exception}")
 
     async def disconnect(self, websocket: Optional[WebSocket] = None, user_id: Optional[str] = None):
         try:
             if user_id:
                 self.authorized_connections.pop(user_id, None)
-                my_logger.debug(f"👾 User {user_id} disconnected")
+                my_logger.debug(f"User with {user_id} ID disconnected")
             elif websocket:
                 self.unauthorized_connections.remove(websocket)
-                my_logger.debug("👻 Anonymous WebSocket disconnected")
+                my_logger.debug("Anonymous WebSocket disconnected")
 
         except Exception as exception:
-            raise ValueError(f"🌋 Exception while disconnecting the websocket connection: {exception}")
+            my_logger.exception("Exception while disconnecting the websocket connection: {exception}")
+            raise ValueError(f"Exception while disconnecting the websocket connection: {exception}")
 
     async def send_personal_message(self, user_id: str, data: dict):
         ws: Optional[WebSocket] = self.authorized_connections.get(user_id)
@@ -102,96 +106,149 @@ class WebSocketContextManager:
         self.tasks: list[Task] = []
 
     async def __aenter__(self):
-        """Context manager entry point"""
         await self._connect()
         return self
 
-    # New method to wait for disconnection
-    async def wait_until_disconnected(self):
-        try:
-            # Wait for either task to complete
-            done, pending = await asyncio.wait(self.tasks, return_when=asyncio.FIRST_COMPLETED)
-            # Cancel remaining tasks
-            for task in pending:
-                task.cancel()
-            # Wait for cancellation to complete
-            await asyncio.gather(*pending, return_exceptions=True)
-        except asyncio.CancelledError:
-            pass
-
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit point - automatic cleanup"""
         await self._disconnect()
 
     async def _connect(self):
-        """Establish all connections"""
         await self.connect_handler(self.user_id, self.websocket)
         self.pubsub = await self.pubsub_generator(self.user_id)
-
-        self.tasks = [asyncio.create_task(self._pubsub_listener()), asyncio.create_task(self._websocket_receiver())]
+        self.tasks = [
+            asyncio.create_task(self._pubsub_listener()),
+            asyncio.create_task(self._websocket_receiver())
+        ]
 
     async def _disconnect(self):
-        """Cleanup all resources"""
-        for task in self.tasks:
-            if not task.done():
-                task.cancel()
-
         if self.pubsub:
-            await self.pubsub.close()
+            try:
+                await self.pubsub.close()
+            except Exception as e:
+                my_logger.exception(f"Failed to close pubsub: {e}")
 
-        await self.disconnect_handler(self.user_id, self.websocket)
+        try:
+            await self.disconnect_handler(self.user_id, self.websocket)
+        except Exception as e:
+            my_logger.exception(f"Disconnect handler error: {e}")
+
+        if self.websocket.client_state == WebSocketState.CONNECTED:
+            try:
+                await self.websocket.close()
+            except Exception as e:
+                my_logger.exception(f"Exception while closing WebSocket: {e}")
+
+    async def wait_until_disconnected(self):
+        try:
+            done, pending = await asyncio.wait(self.tasks, return_when=asyncio.FIRST_COMPLETED)
+        except asyncio.CancelledError:
+            # Handle external cancellation
+            for task in self.tasks:
+                if not task.done() and not task.cancelled():
+                    task.cancel()
+            await asyncio.gather(*self.tasks, return_exceptions=True)
+        else:
+            # Cancel pending tasks
+            for task in pending:
+                if not task.done() and not task.cancelled():
+                    task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
 
     async def _pubsub_listener(self):
-        """Process pubsub messages with registered handlers"""
+        """Listen to Redis pub/sub messages and dispatch them to registered handlers."""
         try:
             async for message in self.pubsub.listen():
-                if isinstance(message, dict):
-                    if message.get("type") != "message":
-                        continue
+                if message.get("type") != "message":
+                    continue
 
-                    pubsub_data: Optional[str] = message.get("data")
-                    if pubsub_data is None:
-                        await self.websocket.send_json(data={"detail": "Pub Sub data came empty!"})
-                        continue
+                pubsub_data = message.get("data")
+                if pubsub_data is None:
+                    continue
 
-                    data = json.loads(pubsub_data)
-                    my_logger.debug(f"data from self.pubsub.listen(): {data}")
+                try:
+                    if isinstance(pubsub_data, bytes):
+                        pubsub_data = pubsub_data.decode("utf-8")
+                    data: dict = json.loads(pubsub_data)
+                except (TypeError, json.JSONDecodeError, UnicodeDecodeError) as e:
+                    my_logger.error(f"Failed to decode pubsub message: {e}")
+                    continue
 
-                    event_type: Optional[str] = data.get("type")
+                event_type: Optional[str] = data.get("type")
+                if event_type is None:
+                    my_logger.warning(f"Missing 'type' field in event data: {data}")
+                    await self.websocket.send_json({"detail": "Missing event type in pubsub message."})
+                    continue
 
-                    if event_type is None:
-                        await self.websocket.send_json(data={"detail": "You must presented event type!"})
+                try:
+                    chat_event = ChatEvent(event_type)
+                except ValueError:
+                    my_logger.exception(f"Invalid event type received: '{event_type}'")
+                    await self.websocket.send_json({"detail": f"Invalid event type: '{event_type}'."})
+                    continue
 
-                    handler: Optional[Callable[[dict], Awaitable[None]]] = self.message_handlers.get(ChatEvent(event_type))
-                    if handler is not None:
-                        await handler(data)
+                handler: Optional[Callable[[dict], Awaitable[None]]] = self.message_handlers.get(chat_event)
+                if handler is None:
+                    my_logger.warning(f"No handler registered for event type: '{event_type}'")
+                    await self.websocket.send_json({"detail": f"No handler for event type: '{event_type}'."})
+                    continue
+
+                try:
+                    await handler(data)
+                except Exception as e:
+                    my_logger.exception(f"Error while handling event '{event_type}': {e}")
+                    await self.websocket.send_json({"detail": f"An error occurred while handling event: '{event_type}'."})
         except asyncio.CancelledError:
-            my_logger.debug("PubSub listener cancelled")
-        except ValueError:
-            await self.websocket.send_json(data={"detail": "You must send valid event type! 🐛"})
+            my_logger.exception("PubSub listener cancelled")
         except Exception as e:
-            my_logger.error(f"PubSub error: {e}")
+            my_logger.exception(f"Unexpected error in pubsub listener: {e}")
 
     async def _websocket_receiver(self):
+        """Receive incoming WebSocket messages and handle heartbeat checks."""
+        last_activity = time.time()
+        received_json: Optional[dict] = None
+        chat_event: Optional[ChatEvent] = None
+
         try:
-            while True:
-                received_json: dict[str, str] = await self.websocket.receive_json()
-                my_logger.debug(f"received_json from user {self.user_id}: {received_json}")
+            while self.websocket.client_state == WebSocketState.CONNECTED:
+                try:
+                    received_json = await asyncio.wait_for(self.websocket.receive_json(), timeout=30.0)
+                    last_activity = time.time()
+                except asyncio.TimeoutError:
+                    if time.time() - last_activity > 60:
+                        my_logger.warning("Connection timeout, disconnecting")
+                        break
+                    try:
+                        await self.websocket.send_json({"type": "heartbeat"})
+                    except WebSocketDisconnect:
+                        my_logger.info("Client disconnected on heartbeat")
+                        break
+                    except Exception as e:
+                        my_logger.warning(f"Heartbeat send failed: {e}")
+                        break
+                    continue
+                except WebSocketDisconnect:
+                    my_logger.info("Client disconnected")
+                    break
+                except Exception as e:
+                    my_logger.warning(f"Invalid message: {e}")
+                    continue
 
-                event_type: Optional[str] = received_json.get("type")
+                event_type = received_json.get("type")
+                if not event_type:
+                    await self.websocket.send_json({"detail": "Missing event type."})
+                    continue
 
-                if event_type is None:
-                    await self.websocket.send_json(data={"detail": "You must presented event type!"})
+                try:
+                    chat_event = ChatEvent(event_type)
+                except ValueError:
+                    my_logger.exception(f"Invalid event type received: '{event_type}'")
+                    await self.websocket.send_json({"detail": f"Invalid event type: '{event_type}'."})
+                    continue
 
-                data = {"type": ChatEvent(event_type).value, "participant_id": self.user_id, "message": received_json}
-                await pubsub_manager.publish(topic=f"chats:home:{self.user_id}", data=json.dumps(data))
-        except WebSocketDisconnect:
-            my_logger.info("Client disconnected gracefully")
-            raise
+                data = {"type": chat_event.value, "participant_id": self.user_id, "message": received_json}
+                await pubsub_manager.publish(topic=f"chats:home:{self.user_id}", data=data)
         except asyncio.CancelledError:
             my_logger.debug("WebSocket receiver cancelled")
-        except ValueError:
-            await self.websocket.send_json(data={"detail": "You must send valid event type! 🐛"})
         except Exception as e:
             my_logger.error(f"WebSocket error: {e}")
 

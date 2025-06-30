@@ -1,7 +1,6 @@
 import json
 import math
 import time
-from asyncio import Task
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 from uuid import uuid4
@@ -61,23 +60,24 @@ async def initialize_redis_indexes() -> None:
 class RedisPubSubManager:
     def __init__(self, cache_redis: CacheRedis):
         self.cache_redis = cache_redis
-        self.tasks: dict[str, Task] = {}
+        self.active_subscriptions: dict[str, PubSub] = {}
 
     async def publish(self, topic: str, data: dict):
         await self.cache_redis.publish(channel=topic, message=json.dumps(data))
 
     async def subscribe(self, topic: str) -> PubSub:
-        try:
-            pubsub: PubSub = self.cache_redis.pubsub()
-            await pubsub.subscribe(topic)
-            return pubsub
-        except Exception as exception:
-            raise ValueError(f"Exception while subscribing: {exception}")
+        pubsub = self.cache_redis.pubsub()
+        await pubsub.subscribe(topic)
+        self.active_subscriptions[topic] = pubsub
+        return pubsub
 
     async def unsubscribe(self, topic: str):
-        if topic in self.tasks:
-            self.tasks[topic].cancel()
-            del self.tasks[topic]
+        if pubsub := self.active_subscriptions.get(topic):
+            try:
+                await pubsub.unsubscribe(topic)
+                await pubsub.close()
+            finally:
+                self.active_subscriptions.pop(topic, None)
 
 
 class ChatCacheManager:
@@ -90,6 +90,7 @@ class ChatCacheManager:
             pipe.sadd(f"chats:online", user_id)
             pipe.smembers(name=f"users:{user_id}:chats")
             results = await pipe.execute()
+        my_logger.debug(f"results in add_user_to_room: {results}")
         return results[1]
 
     async def remove_user_from_room(self, user_id: str):
@@ -97,6 +98,7 @@ class ChatCacheManager:
             pipe.srem(f"chats:online", user_id)
             pipe.smembers(name=f"users:{user_id}:chats")
             results = await pipe.execute()
+        my_logger.debug(f"results in remove_user_from_room: {results}")
         return results[1]
 
     async def add_typing(self, user_id: str, chat_id: str):

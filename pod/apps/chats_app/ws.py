@@ -1,5 +1,4 @@
 import asyncio
-import json
 from typing import Optional
 
 from fastapi import APIRouter, WebSocket
@@ -41,7 +40,7 @@ async def chat_connect(user_id: str, websocket: WebSocket):
     await chat_ws_manager.connect(user_id=user_id, websocket=websocket)
     participant_ids: set[str] = await chat_cache_manager.add_user_to_room(user_id=user_id)
     data = {"type": ChatEvent.goes_online.value, "participant_id": user_id}
-    tasks = [pubsub_manager.publish(topic=f"chats:home:{pid}", data=json.dumps(data)) for pid in participant_ids]
+    tasks = [pubsub_manager.publish(topic=f"chats:home:{participant_id}", data=data) for participant_id in participant_ids]
     await asyncio.gather(*tasks)
 
 
@@ -49,7 +48,7 @@ async def chat_disconnect(user_id: str, websocket: WebSocket):
     await chat_ws_manager.disconnect(user_id=user_id, websocket=websocket)
     participant_ids: set[str] = await chat_cache_manager.remove_user_from_room(user_id)
     data = {"type": ChatEvent.goes_offline.value, "participant_id": user_id}
-    tasks = [pubsub_manager.publish(topic=f"chats:home:{pid}", data=json.dumps(data)) for pid in participant_ids]
+    tasks = [pubsub_manager.publish(topic=f"chats:home:{participant_id}", data=data) for participant_id in participant_ids]
     await asyncio.gather(*tasks)
 
 
