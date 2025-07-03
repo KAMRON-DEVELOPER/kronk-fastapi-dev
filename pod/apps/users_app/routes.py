@@ -19,7 +19,7 @@ from apps.users_app.schemas import (
     ResetPasswordSchema,
     ResultSchema,
     TokenSchema,
-    VerifySchema, ProfileTokenSchema,
+    VerifySchema, ProfileTokenSchema, UserSearchResponseSchema,
 )
 from apps.users_app.tasks import add_follow_to_db, delete_follow_from_db, notify_settings_stats, send_email_task
 from services.firebase_service import validate_firebase_token
@@ -406,10 +406,12 @@ async def refresh_refresh_token_route(jwt: strictJwtDependency):
     return {"access_token": access_token, "refresh_token": refresh_token}
 
 
-@users_router.get(path="/search", status_code=200)
-async def user_search(jwt: jwtDependency, query: str, offset: int = 0, limit: int = 20):
+@users_router.get(path="/search", response_model=UserSearchResponseSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
+async def user_search(jwt: jwtDependency, query: str, offset: int = 0, limit: int = 10):
     try:
         users = await cache_manager.search_user(query=query, user_id=jwt.user_id.hex if jwt is not None else None, offset=offset, limit=limit)
+        schm = UserSearchResponseSchema(**users)
+        my_logger.debug(f"schm.model_dump(): {schm.model_dump(exclude_defaults=True, exclude_none=True)}")
         return users
     except Exception as exception:
         my_logger.critical(f"Exception in user_search: {exception}")

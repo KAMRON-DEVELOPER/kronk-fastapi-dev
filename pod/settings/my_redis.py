@@ -184,12 +184,13 @@ class CacheManager:
         feeds: list[dict] = await self._get_feeds(user_id=user_id, feed_ids=feed_ids)
         return {"feeds": feeds, "end": total_count}
 
-    async def get_user_timeline(self, user_id: str, start: int = 0, end: int = 10) -> dict[str, list[dict] | int]:
-        total_count: int = await self.cache_redis.zcard(name=f"users:{user_id}:user_timeline")
+    async def get_user_timeline(self, user_id: str, engagement_type: EngagementType, start: int = 0, end: int = 10) -> dict[str, list[dict] | int]:
+        prefix: str = 'user_timeline' if engagement_type == EngagementType.feeds else engagement_type.value
+        total_count: int = await self.cache_redis.zcard(name=f"users:{user_id}:{prefix}")
         if total_count == 0:
             return {"feeds": [], "end": 0}
 
-        feed_ids = await self.cache_redis.zrevrange(name=f"user:{user_id}:user_timeline", start=start, end=end)
+        feed_ids = await self.cache_redis.zrevrange(name=f"user:{user_id}:{prefix}", start=start, end=end)
         feeds: list[dict] = await self._get_feeds(user_id=user_id, feed_ids=feed_ids)
         return {"feeds": feeds, "end": total_count}
 
@@ -592,31 +593,49 @@ class CacheManager:
         email_results: SearchResult = await self.search_redis.search.search(index=USER_INDEX_NAME, query=f"@email:{email_query}", offset=0, limit=1)
         return username_results.total > 0, email_results.total > 0
 
-    async def search_user(self, query: str, user_id: Optional[str] = None, offset: int = 0, limit: int = 20):
+    async def search_user(self, query: str, user_id: Optional[str] = None, offset: int = 0, limit: int = 10):
         try:
             username = escape_redisearch_special_chars(query)
             results: SearchResult = await self.search_redis.search.search(index=USER_INDEX_NAME, query=f"@username:{username}*", offset=offset, limit=limit)
-            my_logger.debug(f"search_user results.documents: {results.documents}, count: {results.total}")
 
-            users = []
-
+            users: list[dict] = []
+            user_ids = []
             for document in results.documents:
-                if user_id is not None:
-                    document_id: str = str(document.id)
-                    _user_id = document_id.split(":")[1]
-                    is_following = await self.cache_redis.sismember(name=f"users:{_user_id}:followers", value=user_id)
-                    my_logger.debug(f"is_following: {is_following}")
-                    users.append({**document.properties, "is_following": bool(is_following)})
-            return users
+                document_id: str = str(document.id)
+                uid = document_id.split(":")
+                if len(uid) < 2:
+                    continue
+                if uid[1] != user_id:
+                    user_ids.append(uid[1])
+                users.append(document.properties)
+            my_logger.debug(f"user_id: {user_id}, user_ids: {user_ids}")
+            if user_id is not None:
+                async with self.cache_redis.pipeline() as pipe:
+                    for uid in user_ids:
+                        pipe.sismember(name=f"users:{uid}:followers", value=user_id)
+                    is_followings = await pipe.execute()
+
+                my_logger.debug(f"is_followings: {is_followings}")
+
+                for user, is_following in zip(users, is_followings):
+                    if user:
+                        user.update({"is_following": bool(is_following)})
+
+            return {"users": users, "end": results.total}
         except Exception as e:
             my_logger.error(f"Search error: {str(e)}")
-            return []
+            return {"users": [], "end": 0}
 
-    async def search_feed(self, query: str, user_id: Optional[str] = None, offset: int = 0, limit: int = 20):
-        results: SearchResult = await self.search_redis.search.search(index=feed_INDEX_NAME, query=f"@body:{query}*", offset=offset, limit=limit)
-        my_logger.debug(f"search_feed results.documents: {results.documents}, count: {results.total}")
+    async def search_feed(self, query: str, user_id: Optional[str] = None, offset: int = 0, limit: int = 10):
+        results: SearchResult = await self.search_redis.search.search(index=feed_INDEX_NAME, query=f"@body:{query}*", offset=offset, limit=limit, withpayloads=False)
 
-        feed_ids = [str(document.id).split(":")[1] for document in results.documents]
+        feed_ids: list[str] = []
+        for document in results.documents:
+            document_id: str = str(document.id)
+            fid = document_id.split(":")
+            if len(fid) < 2:
+                continue
+            feed_ids.append(fid[1])
         my_logger.debug(f"feed_ids: {feed_ids}")
 
         feeds = await self._get_feeds(user_id=user_id, feed_ids=feed_ids)

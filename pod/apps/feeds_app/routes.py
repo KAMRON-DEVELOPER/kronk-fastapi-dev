@@ -228,7 +228,7 @@ async def delete_feed_route(jwt: strictJwtDependency, feed_id: UUID, session: DB
 
 
 @feed_router.get(path="/timeline/discover", response_model=FeedResponseSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
-async def discover_timeline_route(jwt: jwtDependency, start: int = 0, end: int = 10):
+async def discover_timeline_route(jwt: jwtDependency, start: int = 0, end: int = 9):
     try:
         feeds = await cache_manager.get_discover_timeline(user_id=jwt.user_id.hex if jwt is not None else None, start=start, end=end)
         return feeds
@@ -238,7 +238,7 @@ async def discover_timeline_route(jwt: jwtDependency, start: int = 0, end: int =
 
 
 @feed_router.get(path="/timeline/following", response_model=FeedResponseSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
-async def following_timeline_route(jwt: strictJwtDependency, start: int = 0, end: int = 10):
+async def following_timeline_route(jwt: strictJwtDependency, start: int = 0, end: int = 9):
     try:
         feeds = await cache_manager.get_following_timeline(user_id=jwt.user_id.hex, start=start, end=end)
         return feeds
@@ -248,9 +248,9 @@ async def following_timeline_route(jwt: strictJwtDependency, start: int = 0, end
 
 
 @feed_router.get(path="/timeline/user", response_model=FeedResponseSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
-async def user_timeline_route(jwt: strictJwtDependency, start: int = 0, end: int = 10):
+async def user_timeline_route(jwt: strictJwtDependency, engagement_type: EngagementType, start: int = 0, end: int = 9):
     try:
-        feeds = await cache_manager.get_user_timeline(user_id=jwt.user_id.hex, start=start, end=end)
+        feeds = await cache_manager.get_user_timeline(user_id=jwt.user_id.hex, engagement_type=engagement_type, start=start, end=end)
         return feeds
     except Exception as e:
         my_logger.debug(f"Exception in user_timeline route: {e}")
@@ -258,7 +258,7 @@ async def user_timeline_route(jwt: strictJwtDependency, start: int = 0, end: int
 
 
 @feed_router.get(path="/comments", response_model=FeedResponseSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
-async def get_comments(jwt: strictJwtDependency, feed_id: UUID, session: DBSession, start: int = 0, end: int = 10):
+async def get_comments(jwt: strictJwtDependency, feed_id: UUID, session: DBSession, start: int = 0, end: int = 9):
     try:
         stmt = (
             select(FeedModel)
@@ -301,7 +301,7 @@ async def remove_engagement(jwt: strictJwtDependency, feed_id: UUID, engagement_
 
 
 @feed_router.get(path="/search", response_model=FeedResponseSchema, status_code=200)
-async def feed_search(jwt: jwtDependency, query: str, offset: int = 0, limit: int = 20):
+async def feed_search(jwt: jwtDependency, query: str, offset: int = 0, limit: int = 10):
     try:
         return await cache_manager.search_feed(query=query, user_id=jwt.user_id.hex if jwt.user_id is not None else None, offset=offset, limit=limit)
     except Exception as exception:

@@ -19,6 +19,7 @@ class UserStatus(AutoName):
 
 
 class EngagementType(AutoName):
+    feeds = auto()
     reposts = auto()
     quotes = auto()
     likes = auto()

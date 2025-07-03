@@ -202,3 +202,12 @@ class ProfileTokenSchema(BaseModel):
 
 class ResultSchema(BaseModel):
     ok: bool
+
+
+class ProfileSearchSchema(ProfileSchema):
+    is_following: Optional[bool] = None
+
+
+class UserSearchResponseSchema(BaseModel):
+    users: list[ProfileSearchSchema]
+    end: int
