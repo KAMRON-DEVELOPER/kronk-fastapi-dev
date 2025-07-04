@@ -186,11 +186,22 @@ class CacheManager:
 
     async def get_user_timeline(self, user_id: str, engagement_type: EngagementType, start: int = 0, end: int = 10) -> dict[str, list[dict] | int]:
         prefix: str = 'user_timeline' if engagement_type == EngagementType.feeds else engagement_type.value
-        total_count: int = await self.cache_redis.zcard(name=f"users:{user_id}:{prefix}")
+
+        if engagement_type == EngagementType.feeds:
+            total_count: int = await self.cache_redis.zcard(name=f"users:{user_id}:{prefix}")
+        else:
+            total_count: int = await self.cache_redis.scard(name=f"users:{user_id}:{prefix}")
+
         if total_count == 0:
             return {"feeds": [], "end": 0}
 
-        feed_ids = await self.cache_redis.zrevrange(name=f"user:{user_id}:{prefix}", start=start, end=end)
+        if engagement_type == EngagementType.feeds:
+            feed_ids = await self.cache_redis.zrevrange(name=f"users:{user_id}:{prefix}", start=start, end=end)
+        else:
+            all_feed_ids: set[str] = await self.cache_redis.smembers(name=f"users:{user_id}:{prefix}")
+            feed_ids = list(all_feed_ids)[start:end + 1]
+            # feed_ids = await self.cache_redis.lrange(name=f"users:{user_id}:{prefix}", start=start, end=end)
+
         feeds: list[dict] = await self._get_feeds(user_id=user_id, feed_ids=feed_ids)
         return {"feeds": feeds, "end": total_count}
 
@@ -306,11 +317,12 @@ class CacheManager:
                     for follower_id in follower_ids:
                         pipe.zrem(f"users:{follower_id}:following_timeline", feed_id)
 
-                    keys = [f"feeds:{feed_id}:{suffix}" for suffix in ["meta", "comments", "reposts", "quotes", "likes", "views", "bookmarks"]]
-                    pipe.delete(*keys)
+                    pipe.hdel(name=f"feeds:{feed_id}:meta")
 
-                    user_engagement_keys = [f"users:{author_id}:{suffix}" for suffix in ["comments", "reposts", "quotes", "likes", "views", "bookmarks"]]
-                    pipe.delete(*user_engagement_keys)
+                    for suffix in ["comments", "reposts", "quotes", "likes", "views", "bookmarks"]:
+                        pipe.srem(f"users:{author_id}:{suffix}", feed_id)
+                        pipe.srem(f"feeds:{feed_id}:{suffix}", author_id)
+
                     await pipe.execute()
 
             else:
@@ -453,10 +465,16 @@ class CacheManager:
 
     ''' ********************************************* USER ********************************************* '''
 
-    async def create_profile(self, mapping: dict):
+    async def create_profile(self, mapping: dict, user_id: Optional[str] = None, is_following: Optional[str] = None):
         try:
             my_logger.debug(f"mapping in create_profile: {mapping}, type: {type(mapping)}")
-            await self.cache_redis.hset(name=f"users:{mapping['id']}:profile", mapping=mapping)
+
+            uid = mapping.get("id")
+            async with self.cache_redis.pipeline() as pipe:
+                pipe.hset(name=f"users:{uid}:profile", mapping=mapping)
+                if user_id is not None and is_following:
+                    pipe.sadd(f"users:{uid}:followers", user_id)
+                await pipe.execute()
         except Exception as e:
             raise ValueError(f"🥶 Exception while saving user data to cache: {e}")
 
@@ -476,9 +494,19 @@ class CacheManager:
         except Exception as e:
             raise ValueError(f"🥶 Exception while updating user data in cache: {e}")
 
-    async def get_profile(self, user_id: str) -> Optional[dict]:
-        profile: dict = await self.cache_redis.hgetall(f"users:{user_id}:profile")
-        return profile if profile else None
+    async def get_profile(self, user_id: str, target_user_id: Optional[str] = None) -> Optional[dict]:
+        async with self.cache_redis.pipeline() as pipe:
+            # key = user_id if requested_user_id is None else requested_user_id
+            user_id = target_user_id or user_id
+            pipe.hgetall(name=f"users:{user_id}:profile")
+            if target_user_id is not None:
+                pipe.sismember(name=f"users:{user_id}:followings", value=target_user_id)
+            results = await pipe.execute()
+
+        user_dict: dict = results[0]
+        if target_user_id is not None:
+            user_dict.update({"is_following": results[1]})
+        return user_dict if user_dict else None
 
     async def delete_profile(self, user_id: str):
         followers: set[str] = await self.get_followers(user_id)

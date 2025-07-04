@@ -5,9 +5,9 @@ from uuid import UUID
 from bcrypt import checkpw, gensalt, hashpw
 from fastapi import APIRouter, HTTPException, UploadFile
 from firebase_admin.auth import UserRecord
-from sqlalchemy import select
+from sqlalchemy import select, exists
 
-from apps.users_app.models import UserModel
+from apps.users_app.models import UserModel, FollowModel
 from apps.users_app.schemas import (
     ForgotPasswordTokenSchema,
     LoginSchema,
@@ -19,7 +19,7 @@ from apps.users_app.schemas import (
     ResetPasswordSchema,
     ResultSchema,
     TokenSchema,
-    VerifySchema, ProfileTokenSchema, UserSearchResponseSchema,
+    VerifySchema, ProfileTokenSchema, UserSearchResponseSchema, ProfileSearchSchema,
 )
 from apps.users_app.tasks import add_follow_to_db, delete_follow_from_db, notify_settings_stats, send_email_task
 from services.firebase_service import validate_firebase_token
@@ -28,6 +28,7 @@ from settings.my_dependency import create_jwt_token, headerTokenDependency, stri
 from settings.my_exceptions import AlreadyExistException, HeaderTokenException, NotFoundException, ValidationException
 from settings.my_minio import put_object_to_minio, remove_objects_from_minio, wipe_objects_from_minio
 from settings.my_redis import cache_manager
+from utility.my_enums import FollowStatus
 from utility.my_logger import my_logger
 from utility.utility import generate_avatar_url, generate_password_string, generate_unique_username
 from utility.validators import allowed_image_extension, get_file_extension, get_image_dimensions
@@ -213,19 +214,26 @@ async def google_auth_route(htd: headerTokenDependency, session: DBSession):
     return await cache_profile(user=new_user)
 
 
-@users_router.get(path="/profile", response_model=ProfileSchema, response_model_exclude_none=True, status_code=200)
-async def get_profile_route(jwt: strictJwtDependency, session: DBSession):
-    cached_user: Optional[dict] = await cache_manager.get_profile(user_id=jwt.user_id.hex)
+@users_router.get(path="/profile", response_model=ProfileSearchSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
+async def get_profile_route(jwt: strictJwtDependency, session: DBSession, target_user_id: Optional[str] = None):
+    cached_user: Optional[dict] = await cache_manager.get_profile(user_id=jwt.user_id.hex, target_user_id=target_user_id)
 
-    my_logger.debug(f"cached_user: {cached_user}")
+    my_logger.debug(f"user in redis(cached_user): {cached_user}")
     if cached_user:
         return cached_user
 
-    user: Optional[UserModel] = await session.get(UserModel, jwt.user_id)
+    user_id = target_user_id or jwt.user_id
+    user: Optional[UserModel] = await session.get(UserModel, user_id)
+    is_following: Optional[bool] = None
+    if target_user_id is not None:
+        exists_stmt = select(FollowModel.id).where(FollowModel.follower_id == jwt.user_id, FollowModel.following_id == target_user_id,
+                                                   FollowModel.follow_status == FollowStatus.accepted)
+        is_following = await session.scalar(select(exists(exists_stmt)))
+
     if not user:
         raise ValueError("User not found")
 
-    return await cache_profile(user=user)
+    return await cache_profile(user=user, user_id=jwt.user_id.hex, is_following=is_following)
 
 
 @users_router.patch(path="/profile/update", response_model=ResultSchema, status_code=200)
@@ -423,11 +431,14 @@ def generate_token(user_id: str) -> dict:
     return {"access_token": create_jwt_token(subject=subject), "refresh_token": create_jwt_token(subject=subject, for_refresh=True)}
 
 
-async def cache_profile(user: UserModel) -> dict:
+async def cache_profile(user: UserModel, user_id: Optional[str] = None, is_following: Optional[bool] = None) -> dict:
     profile_schema = ProfileSchema.model_validate(obj=user)
     mapping = profile_schema.model_dump(exclude_unset=True, exclude_defaults=True, exclude_none=True, mode="json")
 
-    await cache_manager.create_profile(mapping=mapping)
+    await cache_manager.create_profile(mapping=mapping, user_id=user_id, is_following=is_following)
+
+    if is_following is not None:
+        mapping.update({"is_following": is_following})
 
     my_logger.debug("profile caching to redis...")
     my_logger.debug(f"mapping: {mapping}")
