@@ -127,6 +127,8 @@ class ProfileUpdateSchema(BaseModel):
     country: Optional[str] = None
     city: Optional[str] = None
     follow_policy: FollowPolicy = FollowPolicy.auto_accept
+    remove_avatar: bool = False
+    remove_banner: bool = False
 
     class Config:
         use_enum_values = True
@@ -170,6 +172,11 @@ class ProfileUpdateSchema(BaseModel):
             if re.search(violent_words_regex, value, re.IGNORECASE):
                 raise ValidationException(detail="Bio contains sensitive or inappropriate content.")
         return value
+
+
+class ProfileUpdateMediaSchema(BaseModel):
+    avatar_url: Optional[str] = None
+    banner_url: Optional[str] = None
 
 
 class RegistrationTokenSchema(BaseModel):

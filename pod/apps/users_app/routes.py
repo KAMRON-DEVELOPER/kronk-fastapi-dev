@@ -3,7 +3,7 @@ from typing import Optional, Annotated
 from uuid import UUID
 
 from bcrypt import checkpw, gensalt, hashpw
-from fastapi import APIRouter, HTTPException, UploadFile, Form, File
+from fastapi import APIRouter, HTTPException, UploadFile, File
 from firebase_admin.auth import UserRecord
 from sqlalchemy import select, exists
 
@@ -18,7 +18,7 @@ from apps.users_app.schemas import (
     ResetPasswordSchema,
     ResultSchema,
     TokenSchema,
-    VerifySchema, ProfileTokenSchema, UserSearchResponseSchema, ProfileSearchSchema, ProfileUpdateSchema,
+    VerifySchema, ProfileTokenSchema, UserSearchResponseSchema, ProfileSearchSchema, ProfileUpdateSchema, ProfileUpdateMediaSchema,
 )
 from apps.users_app.tasks import add_follow_to_db, delete_follow_from_db, notify_settings_stats, send_email_task
 from services.firebase_service import validate_firebase_token
@@ -27,7 +27,7 @@ from settings.my_dependency import create_jwt_token, headerTokenDependency, stri
 from settings.my_exceptions import AlreadyExistException, HeaderTokenException, NotFoundException, ValidationException
 from settings.my_minio import put_object_to_minio, remove_objects_from_minio, wipe_objects_from_minio
 from settings.my_redis import cache_manager
-from utility.my_enums import FollowStatus, FollowPolicy
+from utility.my_enums import FollowStatus
 from utility.my_logger import my_logger
 from utility.utility import generate_avatar_url, generate_password_string, generate_unique_username
 from utility.validators import allowed_image_extension, get_file_extension, get_image_dimensions
@@ -237,38 +237,74 @@ async def get_profile_route(jwt: strictJwtDependency, session: DBSession, target
 
 
 @users_router.patch(path="/profile/update", response_model=ResultSchema, status_code=200)
-async def update_profile_route(jwt: strictJwtDependency, session: DBSession,
-                               name: Annotated[Optional[str], Form()] = None,
-                               username: Annotated[Optional[str], Form()] = None,
-                               email: Annotated[Optional[str], Form()] = None,
-                               password: Annotated[Optional[str], Form()] = None,
-                               birthdate: Annotated[Optional[str], Form()] = None,
-                               bio: Annotated[Optional[str], Form()] = None,
-                               country: Annotated[Optional[str], Form()] = None,
-                               city: Annotated[Optional[str], Form()] = None,
-                               follow_policy: Annotated[Optional[FollowPolicy], Form()] = None,
-                               avatar_file: Annotated[Optional[UploadFile], File()] = None,
-                               banner_file: Annotated[Optional[UploadFile], File()] = None,
-                               remove_avatar: Annotated[bool, Form()] = False,
-                               remove_banner: Annotated[bool, Form()] = False):
+async def update_profile_route(jwt: strictJwtDependency, session: DBSession, schema: ProfileUpdateSchema):
     try:
         user: Optional[UserModel] = await session.get(UserModel, jwt.user_id)
         if not user:
             raise NotFoundException("User not found.")
 
         ''' Remove Avatar & Banner image'''
-        if remove_avatar:
+        if schema.remove_avatar:
             if user.avatar_url is not None:
                 await remove_objects_from_minio(object_names=[user.avatar_url])
-            # user.avatar_url = None
-            # await cache_manager.update_profile(user_id=user.id.hex, key="avatar_url", value=None)
+            user.avatar_url = None
+            await cache_manager.update_profile(user_id=user.id.hex, key="avatar_url", value=None)
             my_logger.info("avatar removed successfully")
-        if remove_banner:
+        if schema.remove_banner:
             if user.banner_url is not None:
                 await remove_objects_from_minio(object_names=[user.banner_url])
-            # user.banner_url = None
-            # await cache_manager.update_profile(user_id=user.id.hex, key="banner_url", value=None)
+            user.banner_url = None
+            await cache_manager.update_profile(user_id=user.id.hex, key="banner_url", value=None)
             my_logger.info("banner removed successfully")
+
+        ''' Field updating '''
+        profile_schema = ProfileSchema.model_validate(obj=user)
+
+        profile_dict = profile_schema.model_dump()
+        update_dict = schema.model_dump(exclude_unset=True)
+        update_dict2 = schema.model_dump(exclude_defaults=True)
+
+        my_logger.info(f"profile_dict: {profile_dict}")
+        my_logger.info(f"update_dict: {update_dict}")
+        my_logger.info(f"update_dict2: {update_dict2}")
+
+        must_not_be_null_fields = ["username", "email", "password", "follow_policy"]
+
+        for field in must_not_be_null_fields:
+            if field in update_dict and update_dict[field] is None:
+                raise ValidationException(detail=f"Field '{field}' must not be null.")
+
+        if "password" in update_dict:
+            if checkpw(update_dict["password"].encode(), user.password.encode()):
+                update_dict.pop("password", None)
+            else:
+                update_dict["password"] = hashpw(update_dict["password"].encode(), gensalt(8)).decode()
+
+        update_data = {key: value for key, value in update_dict.items() if profile_dict.get(key) != value}
+
+        my_logger.info(f"must update data: {update_data}")
+
+        # if update_data:
+        #     for key, value in update_data.items():
+        #         user.__setattr__(key, value)
+        #         await cache_manager.update_profile(user_id=user.id.hex, key=key, value=value)
+
+        session.add(user)
+        await session.commit()
+
+        return {"ok": True}
+    except Exception as e:
+        my_logger.debug(f"Exception e: {e}")
+        raise ValidationException(detail=str(e))
+
+
+@users_router.patch(path="/profile/update/media", response_model=ProfileUpdateMediaSchema, status_code=200)
+async def update_profile_route(jwt: strictJwtDependency, session: DBSession, avatar_file: Annotated[Optional[UploadFile], File()] = None,
+                               banner_file: Annotated[Optional[UploadFile], File()] = None):
+    try:
+        user: Optional[UserModel] = await session.get(UserModel, jwt.user_id)
+        if not user:
+            raise NotFoundException("User not found.")
 
         ''' Set Avatar & Banner image'''
         if avatar_file is not None:
@@ -288,8 +324,8 @@ async def update_profile_route(jwt: strictJwtDependency, session: DBSession,
 
             avatar_object_name = f"users/{jwt.user_id.hex}/avatar.{avatar_file_extension}"
             avatar_url: str = await put_object_to_minio(object_name=avatar_object_name, data=avatar_bytes)
-            # user.avatar_url = avatar_url
-            # await cache_manager.update_profile(user_id=user.id.hex, key="avatar_url", value=avatar_url)
+            user.avatar_url = avatar_url
+            await cache_manager.update_profile(user_id=user.id.hex, key="avatar_url", value=avatar_url)
             my_logger.info("avatar updated successfully")
 
         if banner_file is not None:
@@ -307,57 +343,17 @@ async def update_profile_route(jwt: strictJwtDependency, session: DBSession,
 
             banner_object_name = f"users/{jwt.user_id.hex}/banner.{banner_file_extension}"
             banner_url: str = await put_object_to_minio(object_name=banner_object_name, data=banner_bytes)
-            # user.banner_url = banner_url
-            # await cache_manager.update_profile(user_id=user.id.hex, key="banner_url", value=banner_url)
+            user.banner_url = banner_url
+            await cache_manager.update_profile(user_id=user.id.hex, key="banner_url", value=banner_url)
             my_logger.info("banner updated successfully")
 
-        ''' Field updating '''
-        profile_schema = ProfileSchema.model_validate(obj=user)
+        session.add(user)
+        await session.commit()
 
-        profile_dict = profile_schema.model_dump()
-        update_dict = ProfileUpdateSchema(
-            name=name,
-            username=username,
-            email=email,
-            password=password,
-            birthdate=birthdate,
-            bio=bio,
-            country=country,
-            city=city,
-            follow_policy=follow_policy
-        ).model_dump()
-
-        must_not_be_null_fields = ["username", "email", "password", "follow_policy"]
-
-        for field in must_not_be_null_fields:
-            if field in update_dict and update_dict[field] is None:
-                raise ValidationException(detail=f"Field '{field}' must not be null.")
-
-        if "password" in update_dict:
-            if checkpw(update_dict["password"].encode(), user.password.encode()):
-                update_dict.pop("password", None)
-            else:
-                update_dict["password"] = hashpw(update_dict["password"].encode(), gensalt(8)).decode()
-
-        my_logger.info(f"profile_dict: {profile_dict}")
-        my_logger.info(f"update_dict: {update_dict}")
-
-        update_data = {key: value for key, value in update_dict.items() if profile_dict.get(key) != value}
-
-        my_logger.info(f"must update data: {update_data}")
-
-        # if update_data:
-        #     for key, value in update_data.items():
-        #         user.__setattr__(key, value)
-        #         await cache_manager.update_profile(user_id=user.id.hex, key=key, value=value)
-
-        # session.add(user)
-
-        # await session.commit()
-        return {"ok": True}
+        return {"avatar_url": user.avatar_url, "banner_url": user.banner_url}
     except Exception as e:
         my_logger.debug(f"Exception e: {e}")
-        return {"ok": False}
+        raise ValidationException(detail=str(e))
 
 
 @users_router.delete(path="/profile/delete", response_model=ResultSchema, status_code=200)
