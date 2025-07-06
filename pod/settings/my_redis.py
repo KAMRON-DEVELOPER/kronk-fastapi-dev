@@ -494,11 +494,34 @@ class CacheManager:
         except Exception as e:
             raise ValueError(f"🥶 Exception while updating user data in cache: {e}")
 
+    async def update_profile_from_mapping(self, user_id: str, mapping: dict[str, Any]):
+        try:
+            keys_for_deletion: list[str] = []
+            for key, value in mapping.items():
+                if isinstance(value, datetime):
+                    mapping[key] = value.timestamp()
+                elif isinstance(value, bool):
+                    mapping[key] = int(value)
+                elif isinstance(value, str):
+                    mapping[key] = value.strip()
+
+                if value is None:
+                    keys_for_deletion.append(key)
+                    mapping.pop(key)
+
+            async with self.cache_redis.pipeline() as pipe:
+                pipe.hset(f"users:{user_id}:profile", mapping=mapping)
+                pipe.hdel(f"users:{user_id}:profile", *keys_for_deletion)
+                await pipe.execute()
+
+        except Exception as e:
+            raise ValueError(f"🥶 Exception while updating user data in cache: {e}")
+
     async def get_profile(self, user_id: str, target_user_id: Optional[str] = None) -> Optional[dict]:
         async with self.cache_redis.pipeline() as pipe:
-            # key = user_id if requested_user_id is None else requested_user_id
-            user_id = target_user_id or user_id
-            pipe.hgetall(name=f"users:{user_id}:profile")
+            my_logger.info(f"user_id: {user_id}, target_user_id: {target_user_id}, type: {type(target_user_id)}")
+            key = target_user_id or user_id
+            pipe.hgetall(name=f"users:{key}:profile")
             if target_user_id is not None:
                 pipe.sismember(name=f"users:{user_id}:followings", value=target_user_id)
             results = await pipe.execute()
@@ -506,6 +529,7 @@ class CacheManager:
         user_dict: dict = results[0]
         if target_user_id is not None:
             user_dict.update({"is_following": results[1]})
+        my_logger.info(f"user_dict: {user_dict}")
         return user_dict if user_dict else None
 
     async def delete_profile(self, user_id: str):

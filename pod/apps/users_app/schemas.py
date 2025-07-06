@@ -7,7 +7,7 @@ from pydantic import BaseModel, field_validator
 
 from settings.my_exceptions import ValidationException
 from utility.my_enums import FollowPolicy, UserRole, UserStatus
-from utility.validators import validate_email, validate_length, validate_password, validate_phone_number, validate_username, violent_words_regex
+from utility.validators import validate_email, validate_length, validate_password, validate_username, violent_words_regex
 
 
 class RegisterSchema(BaseModel):
@@ -121,15 +121,12 @@ class ProfileUpdateSchema(BaseModel):
     name: Optional[str] = None
     username: Optional[str] = None
     email: Optional[str] = None
-    phone_number: Optional[str] = None
     password: Optional[str] = None
     birthdate: Optional[datetime] = None
     bio: Optional[str] = None
     country: Optional[str] = None
     city: Optional[str] = None
     follow_policy: FollowPolicy = FollowPolicy.auto_accept
-    remove_avatar: bool = False
-    remove_banner: bool = False
 
     class Config:
         use_enum_values = True
@@ -144,11 +141,6 @@ class ProfileUpdateSchema(BaseModel):
     @field_validator("email")
     def validate_email(cls, value: Optional[str]):
         validate_email(email=value)
-        return value
-
-    @field_validator("phone_number")
-    def validate_phone_number(cls, value: Optional[str]):
-        validate_phone_number(phone_number=value)
         return value
 
     @field_validator("password")
