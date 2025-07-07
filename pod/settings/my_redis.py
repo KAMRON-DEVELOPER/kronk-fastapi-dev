@@ -645,7 +645,7 @@ class CacheManager:
         email_results: SearchResult = await self.search_redis.search.search(index=USER_INDEX_NAME, query=f"@email:{email_query}", offset=0, limit=1)
         return username_results.total > 0, email_results.total > 0
 
-    async def search_user(self, query: str, user_id: Optional[str] = None, offset: int = 0, limit: int = 10):
+    async def search_user(self, query: str, user_id: Optional[str] = None, offset: int = 0, limit: int = 10) -> dict[str, list[dict] | int]:
         try:
             username = escape_redisearch_special_chars(query)
             results: SearchResult = await self.search_redis.search.search(index=USER_INDEX_NAME, query=f"@username:{username}*", offset=offset, limit=limit)

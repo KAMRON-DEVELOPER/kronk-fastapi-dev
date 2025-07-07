@@ -18,7 +18,7 @@ from apps.users_app.schemas import (
     ResetPasswordSchema,
     ResultSchema,
     TokenSchema,
-    VerifySchema, ProfileTokenSchema, UserSearchResponseSchema, ProfileSearchSchema, ProfileUpdateSchema, ProfileUpdateMediaSchema,
+    VerifySchema, UserSearchResponseSchema, ProfileSearchSchema, ProfileUpdateSchema, ProfileUpdateMediaSchema, ProfileTokenSchema,
 )
 from apps.users_app.tasks import add_follow_to_db, delete_follow_from_db, notify_settings_stats, send_email_task
 from services.firebase_service import validate_firebase_token
@@ -93,17 +93,19 @@ async def verify_route(htd: headerTokenDependency, schema: VerifySchema, session
 @users_router.post(path="/auth/login", response_model=ProfileTokenSchema, status_code=200)
 async def login_route(schema: LoginSchema, session: DBSession):
     # 1. Try from cache
-    search_results = await cache_manager.search_user(query=schema.username, limit=1)
+    search_results: dict[str, list[dict] | int] = await cache_manager.search_user(query=schema.username, limit=1)
+    users = search_results.get("users", [])
     my_logger.debug(f"user_search_results: {search_results}")
-    if len(search_results) > 0:
-        user_data: dict = search_results.pop()
+    if len(users) > 0:
+        user_data: dict = users.pop()
         user_id = user_data.get("id", "")
         user_password = user_data.get("password", "")
         if not checkpw(schema.password.encode(), user_password.encode()):
             raise ValidationException("password is not match.")
-        token = generate_token(user_id=user_id)
-        my_logger.debug(f"token: {token}")
-        return token
+        tokens = generate_tokens(user_id=user_id)
+        my_logger.debug(f"user_data: {user_data}")
+        my_logger.debug(f"tokens: {tokens}")
+        return {"user": user_data, "tokens": tokens}
 
     # 2. Fallback to DB
     stmt = select(UserModel).where(UserModel.username == schema.username)
@@ -435,7 +437,7 @@ async def user_search(jwt: jwtDependency, query: str, offset: int = 0, limit: in
         raise HTTPException(status_code=500, detail="🤯 WTF? Something just exploded on our end. Try again later!")
 
 
-def generate_token(user_id: str) -> dict:
+def generate_tokens(user_id: str) -> dict:
     subject = {"id": user_id}
     return {"access_token": create_jwt_token(subject=subject), "refresh_token": create_jwt_token(subject=subject, for_refresh=True)}
 
@@ -452,4 +454,4 @@ async def cache_profile(user: UserModel, user_id: Optional[str] = None, is_follo
     my_logger.debug("profile caching to redis...")
     my_logger.debug(f"mapping: {mapping}")
 
-    return {"user": mapping, "tokens": generate_token(user_id=user.id.hex)}
+    return {"user": mapping, "tokens": generate_tokens(user_id=user.id.hex)}
