@@ -111,6 +111,7 @@ class ProfileSchema(BaseModel):
     follow_policy: FollowPolicy
     followers_count: int
     followings_count: int
+    feeds_count: Optional[int] = 0
 
     class Config:
         from_attributes = True

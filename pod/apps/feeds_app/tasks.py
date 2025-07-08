@@ -43,6 +43,7 @@ async def recalculate_feed_stats(cache: Annotated[Redis, TaskiqDepends(lambda: m
     return {"ok": True}
 
 
+@broker.task(task_name="set_engagement_task")
 async def set_engagement_task(user_id: str, feed_id: str, engagement_type: EngagementType, session: Annotated[AsyncSession, TaskiqDepends(get_session)]):
     if feed_id is not None:
         if engagement_type == EngagementType.quotes:
@@ -52,6 +53,7 @@ async def set_engagement_task(user_id: str, feed_id: str, engagement_type: Engag
         await session.commit()
 
 
+@broker.task(task_name="remove_engagement_task")
 async def remove_engagement_task(user_id: str, feed_id: str, engagement_type: EngagementType, session: Annotated[AsyncSession, TaskiqDepends(get_session)]):
     if feed_id is not None:
         if engagement_type == EngagementType.quotes:

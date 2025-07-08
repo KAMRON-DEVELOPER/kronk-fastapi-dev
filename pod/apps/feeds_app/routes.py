@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from apps.feeds_app.models import EngagementType, FeedModel, TagModel, CategoryModel
 from apps.feeds_app.schemas import FeedSchema, FeedResponseSchema, EngagementSchema
-from apps.feeds_app.tasks import notify_followers_task
+from apps.feeds_app.tasks import notify_followers_task, set_engagement_task, remove_engagement_task
 from apps.users_app.schemas import ResultSchema
 from settings.my_config import get_settings
 from settings.my_database import DBSession
@@ -289,13 +289,23 @@ async def get_comments(jwt: strictJwtDependency, feed_id: UUID, session: DBSessi
 @feed_router.post(path="/engagement/set", response_model=EngagementSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
 async def set_engagement(jwt: strictJwtDependency, feed_id: UUID, engagement_type: EngagementType, is_comment: bool = False):
     engagement = await cache_manager.set_engagement(user_id=jwt.user_id.hex, feed_id=feed_id.hex, engagement_type=engagement_type, is_comment=is_comment)
+    await set_engagement_task.kiq(user_id=jwt.user_id.hex, feed_id=feed_id, engagement_type=engagement_type)
     my_logger.debug(f"engagement: {engagement}")
+
+    if engagement_type == EngagementType.reposts:
+        follower_ids = cache_manager.get_followers(user_id=jwt.user_id.hex)
+
+        async with cache_manager.cache_redis.pipeline() as pipe:
+            for fid in follower_ids:
+                pipe.hset(name=f"users:{fid}:following_timeline", value=feed_id.hex)
+
     return engagement
 
 
 @feed_router.post(path="/engagement/remove", response_model=EngagementSchema, response_model_exclude_none=True, response_model_exclude_defaults=True, status_code=200)
 async def remove_engagement(jwt: strictJwtDependency, feed_id: UUID, engagement_type: EngagementType, is_comment: bool = False):
     engagement = await cache_manager.remove_engagement(user_id=jwt.user_id.hex, feed_id=feed_id.hex, engagement_type=engagement_type, is_comment=is_comment)
+    await remove_engagement_task.kiq(user_id=jwt.user_id.hex, feed_id=feed_id, engagement_type=engagement_type)
     my_logger.debug(f"engagement: {engagement}")
     return engagement
 

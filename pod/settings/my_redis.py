@@ -259,6 +259,9 @@ class CacheManager:
                     pipe.zadd(name=f"users:{follower_id}:following_timeline", mapping={feed_id: initial_score})
                     pipe.zremrangebyrank(name=f"users:{follower_id}:following_timeline", min=0, max=-max_ft - 1)
 
+                # Increment user's own feeds_count
+                pipe.hincrby(name=f"users:{author_id}:profile", key="feeds_count")
+
                 await pipe.execute()
 
         except Exception as e:
@@ -322,6 +325,9 @@ class CacheManager:
                     for suffix in ["comments", "reposts", "quotes", "likes", "views", "bookmarks"]:
                         pipe.srem(f"users:{author_id}:{suffix}", feed_id)
                         pipe.srem(f"feeds:{feed_id}:{suffix}", author_id)
+
+                    # Decrement user's own feeds_count
+                    pipe.hincrby(name=f"users:{author_id}:profile", key="feeds_count", amount=-1)
 
                     await pipe.execute()
 

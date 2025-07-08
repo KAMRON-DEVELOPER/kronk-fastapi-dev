@@ -43,7 +43,6 @@ async def add_follow_to_db(user_id: UUID, following_id: UUID, session: Annotated
     user: Optional[UserModel] = await session.get(UserModel, user_id)
     if user is None:
         my_logger.error("WTF you are not exist!")
-        # Note we can save to logs
         raise NotFoundException(detail="WTF you are not exist!")
 
     following: Optional[UserModel] = await session.get(UserModel, following_id)

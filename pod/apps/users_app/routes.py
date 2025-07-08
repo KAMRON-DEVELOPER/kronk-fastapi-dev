@@ -92,22 +92,6 @@ async def verify_route(htd: headerTokenDependency, schema: VerifySchema, session
 
 @users_router.post(path="/auth/login", response_model=ProfileTokenSchema, status_code=200)
 async def login_route(schema: LoginSchema, session: DBSession):
-    # 1. Try from cache
-    search_results: dict[str, list[dict] | int] = await cache_manager.search_user(query=schema.username, limit=1)
-    users = search_results.get("users", [])
-    my_logger.debug(f"user_search_results: {search_results}")
-    if len(users) > 0:
-        user_data: dict = users.pop()
-        user_id = user_data.get("id", "")
-        user_password = user_data.get("password", "")
-        if not checkpw(schema.password.encode(), user_password.encode()):
-            raise ValidationException("password is not match.")
-        tokens = generate_tokens(user_id=user_id)
-        my_logger.debug(f"user_data: {user_data}")
-        my_logger.debug(f"tokens: {tokens}")
-        return {"user": user_data, "tokens": tokens}
-
-    # 2. Fallback to DB
     stmt = select(UserModel).where(UserModel.username == schema.username)
     result = await session.execute(stmt)
     user: Optional[UserModel] = result.scalar_one_or_none()
@@ -264,11 +248,9 @@ async def update_profile_route(jwt: strictJwtDependency, session: DBSession, sch
 
         profile_dict = profile_schema.model_dump()
         update_dict = schema.model_dump(exclude_unset=True)
-        update_dict2 = schema.model_dump(exclude_defaults=True)
 
         my_logger.info(f"profile_dict: {profile_dict}")
         my_logger.info(f"update_dict: {update_dict}")
-        my_logger.info(f"update_dict2: {update_dict2}")
 
         must_not_be_null_fields = ["username", "email", "password", "follow_policy"]
 
@@ -286,10 +268,10 @@ async def update_profile_route(jwt: strictJwtDependency, session: DBSession, sch
 
         my_logger.info(f"must update data: {update_data}")
 
-        # if update_data:
-        #     for key, value in update_data.items():
-        #         user.__setattr__(key, value)
-        #         await cache_manager.update_profile(user_id=user.id.hex, key=key, value=value)
+        if update_data:
+            for key, value in update_data.items():
+                user.__setattr__(key, value)
+                await cache_manager.update_profile(user_id=user.id.hex, key=key, value=value)
 
         session.add(user)
         await session.commit()
