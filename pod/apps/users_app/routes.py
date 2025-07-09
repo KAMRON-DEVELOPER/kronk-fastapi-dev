@@ -53,7 +53,7 @@ async def register_route(schema: RegisterSchema, htd: headerTokenDependency) -> 
     if is_email_taken:
         raise AlreadyExistException(detail="Email already exists.")
 
-    code = "".join([str(randint(a=0, b=9)) for _ in range(4)])
+    code = f"{randint(0, 9999):04}"
     mapping = {**schema.model_dump(), "code": code}
     verify_token, verify_token_expiration_date = await cache_manager.set_registration_credentials(mapping=mapping)
 
@@ -204,7 +204,6 @@ async def get_profile_route(jwt: strictJwtDependency, session: DBSession, target
     my_logger.info(f"target_user_id: {target_user_id}, type: {type(target_user_id)}")
     cached_user: Optional[dict] = await cache_manager.get_profile(user_id=jwt.user_id.hex, target_user_id=target_user_id)
 
-    my_logger.debug(f"user in redis(cached_user): {cached_user}")
     if cached_user:
         return cached_user
 
@@ -307,7 +306,7 @@ async def update_profile_route(jwt: strictJwtDependency, session: DBSession, ava
                 raise ValidationException(detail="Avatar image size exceeded limit 2MB.")
 
             avatar_object_name = f"users/{jwt.user_id.hex}/avatar.{avatar_file_extension}"
-            avatar_url: str = await put_object_to_minio(object_name=avatar_object_name, data=avatar_bytes)
+            avatar_url: str = await put_object_to_minio(object_name=avatar_object_name, data=avatar_bytes, content_type=avatar_file.content_type)
             user.avatar_url = avatar_url
             await cache_manager.update_profile(user_id=user.id.hex, key="avatar_url", value=avatar_url)
             my_logger.info("avatar updated successfully")
@@ -326,7 +325,7 @@ async def update_profile_route(jwt: strictJwtDependency, session: DBSession, ava
                 raise ValidationException(detail="Banner image size exceeded limit 2MB.")
 
             banner_object_name = f"users/{jwt.user_id.hex}/banner.{banner_file_extension}"
-            banner_url: str = await put_object_to_minio(object_name=banner_object_name, data=banner_bytes)
+            banner_url: str = await put_object_to_minio(object_name=banner_object_name, data=banner_bytes, content_type=banner_file.content_type)
             user.banner_url = banner_url
             await cache_manager.update_profile(user_id=user.id.hex, key="banner_url", value=banner_url)
             my_logger.info("banner updated successfully")
@@ -412,7 +411,6 @@ async def user_search(jwt: jwtDependency, query: str, offset: int = 0, limit: in
     try:
         users = await cache_manager.search_user(query=query, user_id=jwt.user_id.hex if jwt is not None else None, offset=offset, limit=limit)
         schm = UserSearchResponseSchema(**users)
-        my_logger.debug(f"schm.model_dump(): {schm.model_dump(exclude_defaults=True, exclude_none=True)}")
         return users
     except Exception as exception:
         my_logger.critical(f"Exception in user_search: {exception}")

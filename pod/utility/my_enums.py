@@ -84,7 +84,8 @@ class CommentPolicy(AutoName):
 
 
 class PubSubTopics(AutoName):
-    HOME_TIMELINE = "users:{follower_id}:home_timeline"
+    FEEDS = "feeds:{follower_id}"
+    CHATS = "chats:{participant_id}"
     SETTINGS_STATS = "settings:stats"
 
 

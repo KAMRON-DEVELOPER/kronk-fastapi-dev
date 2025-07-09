@@ -5,9 +5,9 @@ from typing import Optional
 import aiohttp
 from miniopy_async.api import Minio
 from miniopy_async.datatypes import Object
-
 # from miniopy_async.datatypes import ListObjects, Object
 from miniopy_async.helpers import ObjectWriteResult
+
 from settings.my_config import get_settings
 from utility.my_logger import my_logger
 
@@ -35,12 +35,13 @@ async def get_object_from_minio(object_name: str) -> bytes:
         raise ValueError("Exception in get_data_from_minio: {e}")
 
 
-async def put_object_to_minio(object_name: str, data: bytes, old_object_name: Optional[str] = None, for_update: bool = False) -> str:
+async def put_object_to_minio(object_name: str, data: bytes, content_type: str, old_object_name: Optional[str] = None, for_update: bool = False) -> str:
     try:
         if for_update and old_object_name:
             await minio_client.remove_object(bucket_name=settings.MINIO_BUCKET_NAME, object_name=old_object_name)
 
-        result: ObjectWriteResult = await minio_client.put_object(bucket_name=settings.MINIO_BUCKET_NAME, object_name=object_name, data=BytesIO(data), length=len(data))
+        result: ObjectWriteResult = await minio_client.put_object(bucket_name=settings.MINIO_BUCKET_NAME, object_name=object_name, data=BytesIO(data), length=len(data),
+                                                                  content_type=content_type)
 
         return result.object_name
     except Exception as e:
@@ -48,12 +49,13 @@ async def put_object_to_minio(object_name: str, data: bytes, old_object_name: Op
         raise ValueError(f"Exception in put_data_to_minio: {e}")
 
 
-async def put_file_to_minio(object_name: str, file_path: Path, old_object_name: Optional[str] = None, for_update=False) -> str:
+async def put_file_to_minio(object_name: str, file_path: Path, content_type: str, old_object_name: Optional[str] = None, for_update=False) -> str:
     try:
         if for_update and old_object_name:
             await minio_client.remove_object(bucket_name=settings.MINIO_BUCKET_NAME, object_name=old_object_name)
 
-        result: ObjectWriteResult = await minio_client.fput_object(bucket_name=settings.MINIO_BUCKET_NAME, object_name=object_name, file_path=str(file_path))
+        result: ObjectWriteResult = await minio_client.fput_object(bucket_name=settings.MINIO_BUCKET_NAME, object_name=object_name, file_path=str(file_path),
+                                                                   content_type=content_type)
 
         return result.object_name
     except Exception as e:

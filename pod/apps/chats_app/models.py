@@ -56,8 +56,8 @@ class GroupModel(BaseModel):
 class GroupMessageModel(MessageBaseModel):
     __tablename__ = "group_message_table"
     group_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey(column="group_table.id", ondelete="CASCADE"))
-    group: Mapped["GroupModel"] = relationship(back_populates="group_messages")
-    sender: Mapped["UserModel"] = relationship(back_populates="group_messages")
+    group: Mapped["GroupModel"] = relationship(back_populates="group_messages", passive_deletes=True)
+    sender: Mapped["UserModel"] = relationship(back_populates="group_messages", passive_deletes=True)
 
 
 class ChatParticipantModel(BaseModel):
@@ -81,5 +81,5 @@ class ChatModel(BaseModel):
 class ChatMessageModel(MessageBaseModel):
     __tablename__ = "chat_message_table"
     chat_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey(column="chat_table.id", ondelete="CASCADE"))
-    chat: Mapped["ChatModel"] = relationship(argument="ChatModel", back_populates="chat_messages")
-    sender: Mapped["UserModel"] = relationship(argument="UserModel", back_populates="chat_messages")
+    chat: Mapped["ChatModel"] = relationship(argument="ChatModel", back_populates="chat_messages", passive_deletes=True)
+    sender: Mapped["UserModel"] = relationship(argument="UserModel", back_populates="chat_messages", passive_deletes=True)

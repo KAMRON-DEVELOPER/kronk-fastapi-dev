@@ -17,15 +17,20 @@ from utility.my_logger import my_logger
 
 @broker.task(task_name="notify_followers_task")
 async def notify_followers_task(user_id: str):
-    avatar_url = await cache_manager.get_profile_avatar_url(user_id=user_id)
+    my_logger.warning(f"user_id: {user_id}")
+    avatar_url: Optional[str] = await cache_manager.get_profile_avatar_url(user_id=user_id)
+    my_logger.warning(f"avatar_url: {avatar_url}")
     follower_ids = await cache_manager.get_followers(user_id=user_id)
-    online_users = await cache_manager.get_online_users_in_home_timeline()
+    my_logger.warning(f"follower_ids: {follower_ids}")
+    online_users = await cache_manager.get_users_from_feeds()
+    my_logger.warning(f"online_users: {online_users}")
 
     online_followers = [fid for fid in follower_ids if fid in online_users]
+    my_logger.warning(f"online_followers: {online_followers}")
 
     async def notify(follower_id: str):
-        topic = PubSubTopics.HOME_TIMELINE.value.format(follower_id=follower_id)
-        await pubsub_manager.publish(topic=topic, data={"user_id": user_id, "avatar_url": avatar_url, "event": "new_post"})
+        topic = PubSubTopics.FEEDS.value.format(follower_id=follower_id)
+        await pubsub_manager.publish(topic=topic, data={"user_id": user_id, "avatar_url": avatar_url if avatar_url else 'defaults/default-avatar.jpg', "event": "new_feed"})
 
     tasks = [notify(follower_id) for follower_id in online_followers]
     await asyncio.gather(*tasks)
@@ -33,7 +38,7 @@ async def notify_followers_task(user_id: str):
     my_logger.info(f"📣 Notified {len(online_followers)} followers of {user_id}")
 
 
-@broker.task(task_name="recalculate_feed_stats", schedule=[{"cron": "*/60 * * * *"}])
+@broker.task(task_name="recalculate_feed_stats", schedule=[{"cron": "*/360 * * * *"}])
 async def recalculate_feed_stats(cache: Annotated[Redis, TaskiqDepends(lambda: my_cache_redis)]):
     my_logger.debug(f"recalculate_feed_stats starting...")
     # my_logger.debug(f"cache users count: {await cache.hget(name='users', key='count')}")

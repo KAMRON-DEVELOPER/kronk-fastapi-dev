@@ -1,8 +1,8 @@
 """Initial migration
 
-Revision ID: 3a897ef07379
+Revision ID: 40df8a0448fe
 Revises: 
-Create Date: 2025-06-25 17:09:48.704661
+Create Date: 2025-07-09 18:20:13.739077
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '3a897ef07379'
+revision: str = '40df8a0448fe'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -98,7 +98,7 @@ def upgrade() -> None:
     sa.Column('body', sa.String(length=200), nullable=False),
     sa.Column('author_id', sa.UUID(), nullable=False),
     sa.Column('video_url', sa.String(length=255), nullable=True),
-    sa.Column('image_urls', sa.ARRAY(sa.String(), dimensions=4), nullable=True),
+    sa.Column('image_url', sa.String(length=255), nullable=True),
     sa.Column('scheduled_at', sa.TIMESTAMP(), nullable=True),
     sa.Column('feed_visibility', sa.Enum('public', 'followers', 'private', 'archived', name='feed_visibility'), nullable=False),
     sa.Column('comment_policy', sa.Enum('everyone', 'followers', name='comment_policy'), nullable=False),
@@ -108,10 +108,10 @@ def upgrade() -> None:
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('created_at', sa.TIMESTAMP(timezone=True), nullable=False),
     sa.Column('updated_at', sa.TIMESTAMP(timezone=True), nullable=False),
-    sa.ForeignKeyConstraint(['author_id'], ['user_table.id'], ),
-    sa.ForeignKeyConstraint(['category_id'], ['category_table.id'], ),
-    sa.ForeignKeyConstraint(['parent_id'], ['feed_table.id'], ),
-    sa.ForeignKeyConstraint(['quote_id'], ['feed_table.id'], ),
+    sa.ForeignKeyConstraint(['author_id'], ['user_table.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['category_id'], ['category_table.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['parent_id'], ['feed_table.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['quote_id'], ['feed_table.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('follow_table',
@@ -144,12 +144,12 @@ def upgrade() -> None:
     op.create_table('engagement_table',
     sa.Column('user_id', sa.UUID(), nullable=False),
     sa.Column('feed_id', sa.UUID(), nullable=False),
-    sa.Column('engagement_type', sa.Enum('reposts', 'quotes', 'likes', 'views', 'bookmarks', name='engagement_type'), nullable=False),
+    sa.Column('engagement_type', sa.Enum('feeds', 'reposts', 'quotes', 'likes', 'views', 'bookmarks', name='engagement_type'), nullable=False),
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('created_at', sa.TIMESTAMP(timezone=True), nullable=False),
     sa.Column('updated_at', sa.TIMESTAMP(timezone=True), nullable=False),
-    sa.ForeignKeyConstraint(['feed_id'], ['feed_table.id'], ),
-    sa.ForeignKeyConstraint(['user_id'], ['user_table.id'], ),
+    sa.ForeignKeyConstraint(['feed_id'], ['feed_table.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['user_id'], ['user_table.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('user_id', 'feed_id', 'engagement_type', name='uq_feed_engagement')
     )
@@ -159,8 +159,8 @@ def upgrade() -> None:
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('created_at', sa.TIMESTAMP(timezone=True), nullable=False),
     sa.Column('updated_at', sa.TIMESTAMP(timezone=True), nullable=False),
-    sa.ForeignKeyConstraint(['feed_id'], ['feed_table.id'], ),
-    sa.ForeignKeyConstraint(['tag_id'], ['tag_table.id'], ),
+    sa.ForeignKeyConstraint(['feed_id'], ['feed_table.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['tag_id'], ['tag_table.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('feed_id', 'tag_id', 'id')
     )
     op.create_table('group_message_table',
@@ -198,8 +198,8 @@ def upgrade() -> None:
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('created_at', sa.TIMESTAMP(timezone=True), nullable=False),
     sa.Column('updated_at', sa.TIMESTAMP(timezone=True), nullable=False),
-    sa.ForeignKeyConstraint(['feed_id'], ['feed_table.id'], ),
-    sa.ForeignKeyConstraint(['user_id'], ['user_table.id'], ),
+    sa.ForeignKeyConstraint(['feed_id'], ['feed_table.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['user_id'], ['user_table.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('user_id', 'feed_id', 'report_reason', name='uq_feed_report')
     )

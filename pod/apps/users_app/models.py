@@ -67,15 +67,15 @@ class UserModel(BaseModel):
         argument="FollowModel", back_populates="follower", foreign_keys="[FollowModel.follower_id]", cascade="all, delete-orphan"
     )
     feeds: Mapped[list["FeedModel"]] = relationship(argument="FeedModel", back_populates="author")
-    engagements: Mapped[list["EngagementModel"]] = relationship(argument="EngagementModel", back_populates="user")
+    engagements: Mapped[list["EngagementModel"]] = relationship(argument="EngagementModel", back_populates="user", passive_deletes=True)
     reports: Mapped[list["ReportModel"]] = relationship(argument="ReportModel", back_populates="user")
 
-    group_participants: Mapped[list["GroupParticipantModel"]] = relationship(argument="GroupParticipantModel", back_populates="user", cascade="all, delete-orphan")
+    group_participants: Mapped[list["GroupParticipantModel"]] = relationship(argument="GroupParticipantModel", back_populates="user")
     groups: Mapped[list["GroupModel"]] = relationship(secondary="group_participant_table", back_populates="users", viewonly=True)
-    group_messages: Mapped[list["GroupMessageModel"]] = relationship(argument="GroupMessageModel", back_populates="sender", cascade="all, delete-orphan")
-    chat_participants: Mapped[list["ChatParticipantModel"]] = relationship(argument="ChatParticipantModel", back_populates="user", cascade="all, delete-orphan")
+    group_messages: Mapped[list["GroupMessageModel"]] = relationship(argument="GroupMessageModel", back_populates="sender")
+    chat_participants: Mapped[list["ChatParticipantModel"]] = relationship(argument="ChatParticipantModel", back_populates="user")
     chats: Mapped[list["ChatModel"]] = relationship(secondary="chat_participant_table", back_populates="users", viewonly=True)
-    chat_messages: Mapped[list["ChatMessageModel"]] = relationship(argument="ChatMessageModel", back_populates="sender", cascade="all, delete-orphan")
+    chat_messages: Mapped[list["ChatMessageModel"]] = relationship(argument="ChatMessageModel", back_populates="sender")
 
     def __repr__(self):
         return f"UserModel of {self.username}"

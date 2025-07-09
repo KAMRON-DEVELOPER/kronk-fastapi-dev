@@ -6,6 +6,7 @@ from redis.asyncio.client import PubSub
 from settings.my_dependency import websocketDependency
 from settings.my_redis import cache_manager, pubsub_manager
 from settings.my_websocket import home_timeline_ws_manager
+from utility.my_enums import PubSubTopics
 from utility.my_logger import my_logger
 
 feed_ws_router = APIRouter()
@@ -22,8 +23,9 @@ async def home_timeline(websocket_dependency: websocketDependency):
 
     try:
         await home_timeline_ws_manager.connect(user_id=user_id, websocket=websocket)
-        pubsub = await pubsub_manager.subscribe(f"user:{user_id}:home_timeline")
-        await cache_manager.add_online_users_in_home_timeline(user_id)
+        topic = PubSubTopics.FEEDS.value.format(follower_id=user_id)
+        pubsub = await pubsub_manager.subscribe(topic=topic)
+        await cache_manager.add_user_to_feeds(user_id)
 
         listener_task = asyncio.create_task(_pubsub_listener(pubsub, websocket))
         receiver_task = asyncio.create_task(_websocket_receiver(websocket))
@@ -40,6 +42,7 @@ async def _pubsub_listener(pubsub: PubSub, websocket: WebSocket):
     try:
         async for message in pubsub.listen():
             if message["type"] == "message":
+                my_logger.warning(f"message: ${message}, type: {type(message)}")
                 data = message["data"]
                 if isinstance(data, bytes):
                     data = data.decode()
@@ -61,7 +64,7 @@ async def _cleanup_connection(user_id: str, pubsub: PubSub, *tasks):
         if task and not task.done():
             task.cancel()
     await home_timeline_ws_manager.disconnect(user_id=user_id)
-    await cache_manager.remove_online_users_in_home_timeline(user_id)
+    await cache_manager.remove_user_from_feeds(user_id)
     if pubsub:
         await pubsub.close()
     my_logger.info(f"Cleaned up connection for {user_id}")

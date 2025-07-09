@@ -12,10 +12,9 @@ from sqlalchemy.orm import selectinload
 from apps.feeds_app.models import EngagementType, FeedModel, TagModel, CategoryModel
 from apps.feeds_app.schemas import FeedSchema, FeedResponseSchema, EngagementSchema
 from apps.feeds_app.tasks import notify_followers_task, set_engagement_task, remove_engagement_task
-from apps.users_app.schemas import ResultSchema
 from settings.my_config import get_settings
 from settings.my_database import DBSession
-from settings.my_dependency import JWTCredential, strictJwtDependency, jwtDependency
+from settings.my_dependency import strictJwtDependency, jwtDependency
 from settings.my_exceptions import NotFoundException, ValidationException
 from settings.my_minio import put_file_to_minio, put_object_to_minio, remove_objects_from_minio
 from settings.my_redis import cache_manager
@@ -39,7 +38,7 @@ async def create_feed_route(jwt: strictJwtDependency, session: DBSession,
                             category_id: Annotated[Optional[UUID], Form()] = None,
                             tags: Annotated[Optional[list[UUID]], Form()] = None,
                             video_file: Annotated[Optional[UploadFile], File()] = None,
-                            image_files: Annotated[Optional[list[UploadFile]], File()] = None):
+                            image_file: Annotated[Optional[UploadFile], File()] = None):
     try:
         if not body.strip():
             raise ValidationException(detail="body must be provided.")
@@ -61,10 +60,6 @@ async def create_feed_route(jwt: strictJwtDependency, session: DBSession,
         if feed_visibility is not None and feed_visibility != FeedVisibility.public:
             feed.feed_visibility = feed_visibility
 
-        session.add(instance=feed)
-        await session.commit()
-        await session.refresh(instance=feed)
-
         if category_id:
             category_exists: Optional[CategoryModel] = await session.scalar(select(CategoryModel).where(CategoryModel.id == category_id))
             if not category_exists:
@@ -81,21 +76,19 @@ async def create_feed_route(jwt: strictJwtDependency, session: DBSession,
             tags = await session.scalars(select(TagModel).where(TagModel.id.in_(tags)))
             feed.tags.extend(tags.all())
 
-        if image_files:
-            my_logger.debug(f"image_files: {image_files}")
-            urls = await validate_and_save_images(jwt=jwt, image_files=image_files)
-            my_logger.debug(f"urls: {urls}")
-            if urls:
-                feed.image_urls = urls
-                await cache_manager.update_feed(feed_id=feed.id.hex, key="image_urls", value=urls)
+        if image_file:
+            my_logger.debug(f"image_file: {image_file}")
+            image_url = await validate_and_save_image(user_id=jwt.user_id.hex, image_file=image_file)
+            my_logger.debug(f"image_url: {image_url}")
+            feed.image_url = image_url
 
         if video_file:
             my_logger.debug(f"video_file.filename: {video_file.filename}")
-            object_name = await validate_and_save_video(jwt=jwt, video_file=video_file)
-            my_logger.debug(f"object_name: {object_name}")
-            feed.video_url = object_name
-            await cache_manager.update_feed(feed_id=feed.id.hex, key="video_url", value=object_name)
+            video_url = await validate_and_save_video(user_id=jwt.user_id.hex, video_file=video_file)
+            my_logger.debug(f"video_url: {video_url}")
+            feed.video_url = video_url
 
+        session.add(instance=feed)
         await session.commit()
         await session.refresh(instance=feed, attribute_names=["id", "created_at", "updated_at", "author", "tags", "category"])
 
@@ -105,7 +98,9 @@ async def create_feed_route(jwt: strictJwtDependency, session: DBSession,
 
         await cache_manager.create_feed(mapping=mapping)
 
+        my_logger.warning("notification is starting...")
         if feed.feed_visibility in [FeedVisibility.public, FeedVisibility.followers] and parent_id is None:
+            my_logger.warning("notification is processing...")
             await notify_followers_task.kiq(user_id=jwt.user_id.hex)
 
         return feed_schema
@@ -114,7 +109,7 @@ async def create_feed_route(jwt: strictJwtDependency, session: DBSession,
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@feed_router.patch(path="/update", response_model=ResultSchema, status_code=200)
+@feed_router.patch(path="/update", response_model=FeedSchema, status_code=200)
 async def update_feed_route(jwt: strictJwtDependency, session: DBSession,
                             feed_id: UUID,
                             body: Annotated[Optional[str], Form()] = None,
@@ -124,15 +119,15 @@ async def update_feed_route(jwt: strictJwtDependency, session: DBSession,
                             tags: Annotated[Optional[list[UUID]], Form()] = None,
                             category_id: Annotated[Optional[UUID], Form()] = None,
                             video_file: Annotated[Optional[UploadFile], File()] = None,
-                            image_files: Annotated[Optional[list[UploadFile]], File()] = None,
-                            remove_video_target: Annotated[Optional[str], Form()] = None,
-                            remove_image_targets: Annotated[Optional[list[str]], Form()] = None):
+                            image_file: Annotated[Optional[UploadFile], File()] = None,
+                            remove_video: Annotated[Optional[str], Form()] = None,
+                            remove_image: Annotated[Optional[str], Form()] = None):
     try:
         my_logger.debug(f"body: {body}")
-        my_logger.debug(f"video_file: {video_file.filename if video_file is not None else None}")
-        my_logger.debug(f"remove_image_targets: {len(image_files) if image_files else None}")
-        my_logger.debug(f"remove_video_target: {remove_video_target}")
-        my_logger.debug(f"remove_image_targets: {remove_image_targets}")
+        my_logger.debug(f"video_file.filename: {video_file.filename if video_file is not None else None}")
+        my_logger.debug(f"image_file.filename: {image_file.filename if video_file is not None else None}")
+        my_logger.debug(f"remove_video: {remove_video}")
+        my_logger.debug(f"remove_image: {remove_image}")
 
         stmt = select(FeedModel).where(FeedModel.id == feed_id)
         result: Result = await session.execute(stmt)
@@ -184,32 +179,34 @@ async def update_feed_route(jwt: strictJwtDependency, session: DBSession,
             feed.tags.extend(db_tags.all())
             await cache_manager.update_feed(feed_id=feed.id.hex, key="tags", value=tags)
 
-        if remove_image_targets and feed.image_urls:
-            await remove_objects_from_minio([target for target in remove_image_targets if target in feed.image_urls])
-        if remove_video_target and feed.video_url == remove_video_target:
+        if remove_image and feed.image_url:
+            await remove_objects_from_minio([feed.image_url])
+        if remove_video and feed.video_url == remove_video:
             await remove_objects_from_minio([feed.video_url])
 
-        if image_files:
-            my_logger.debug(f"image_files: {image_files}")
-            urls = await validate_and_save_images(jwt=jwt, image_files=image_files)
-            my_logger.debug(f"urls: {urls}")
-            if urls:
-                feed.image_urls = urls
-                await cache_manager.update_feed(feed_id=feed.id.hex, key="image_urls", value=urls)
+        if image_file:
+            my_logger.debug(f"image_file: {image_file}")
+            url = await validate_and_save_image(user_id=jwt.user_id.hex, image_file=image_file)
+            my_logger.debug(f"url: {url}")
+            feed.image_url = url
+            await cache_manager.update_feed(feed_id=feed.id.hex, key="image_url", value=url)
 
         if video_file:
             my_logger.debug(f"video_file.filename: {video_file.filename}")
-            object_name = await validate_and_save_video(jwt=jwt, video_file=video_file)
+            object_name = await validate_and_save_video(user_id=jwt.user_id.hex, video_file=video_file)
             my_logger.debug(f"object_name: {object_name}")
             feed.video_url = object_name
             await cache_manager.update_feed(feed_id=feed.id.hex, key="video_url", value=object_name)
 
+        session.add(instance=feed)
         await session.commit()
+        await session.refresh(instance=feed, attribute_names=["id", "created_at", "updated_at", "author", "tags", "category"])
 
-        return {"ok": True}
+        feed_schema = FeedSchema.model_validate(obj=feed)
+        return feed_schema
     except Exception as e:
         my_logger.exception(f"Exception while creating post media, e: {e}")
-        return {"ok": False}
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @feed_router.delete(path="/delete", status_code=204)
@@ -220,8 +217,8 @@ async def delete_feed_route(jwt: strictJwtDependency, feed_id: UUID, session: DB
 
     if feed.video_url:
         await remove_objects_from_minio(object_names=[feed.video_url])
-    if feed.image_urls:
-        await remove_objects_from_minio(object_names=feed.image_urls)
+    if feed.image_url:
+        await remove_objects_from_minio(object_names=[feed.image_url])
     await session.delete(instance=feed)
     await session.commit()
     await cache_manager.delete_feed(author_id=jwt.user_id.hex, feed_id=feed_id.hex)
@@ -329,24 +326,17 @@ async def cleanup_temp_files(paths: list):
             my_logger.error(f"Failed to delete temp file {path}: {cleanup_error}")
 
 
-async def validate_and_save_images(jwt: JWTCredential, image_files: list[UploadFile]):
-    if len(image_files) > 4:
-        raise ValidationException(detail="each feed allowed images limit is 4")
-
-    validated_image_urls = []
-    for image_file in image_files:
-        ext = get_file_extension(file=image_file)
-        if ext not in allowed_image_extension:
-            raise ValidationException(detail="Only PNG, JPG, and JPEG formats are allowed for feed images")
-        content = await image_file.read()
-        if len(content) > 4 * 1024 * 1024:
-            raise ValidationException(detail="Feed image size exceeded limit 2MB.")
-        url = await put_object_to_minio(object_name=f"users/{jwt.user_id.hex}/post_images/{image_file.filename}", data=content)
-        validated_image_urls.append(url)
-    return validated_image_urls
+async def validate_and_save_image(user_id: str, image_file: UploadFile) -> str:
+    ext = get_file_extension(file=image_file)
+    if ext not in allowed_image_extension:
+        raise ValidationException(detail="Only PNG, JPG, and JPEG formats are allowed for feed images")
+    content = await image_file.read()
+    if len(content) > 4 * 1024 * 1024:
+        raise ValidationException(detail="Feed image size exceeded limit 4MB.")
+    return await put_object_to_minio(object_name=f"users/{user_id}/feed_images/{image_file.filename}", data=content, content_type=image_file.content_type)
 
 
-async def validate_and_save_video(jwt: JWTCredential, video_file: UploadFile):
+async def validate_and_save_video(user_id: str, video_file: UploadFile) -> str:
     temp_folder = settings.TEMP_VIDEOS_FOLDER_PATH
     faststart_folder = temp_folder / "faststart"
     temp_folder.mkdir(parents=True, exist_ok=True)
@@ -375,7 +365,7 @@ async def validate_and_save_video(jwt: JWTCredential, video_file: UploadFile):
         ffmpeg = FFmpeg().input(str(faststart_video_path)).output(str(temp_video_path), c="copy", movflags="faststart")
         await ffmpeg.execute()
 
-        return await put_file_to_minio(object_name=f"users/{jwt.user_id.hex}/feed_videos/{video_file.filename}", file_path=temp_video_path)
+        return await put_file_to_minio(object_name=f"users/{user_id}/feed_videos/{video_file.filename}", file_path=temp_video_path, content_type=video_file.content_type)
 
     finally:
         await cleanup_temp_files([temp_video_path, faststart_video_path])

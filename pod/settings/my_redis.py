@@ -85,14 +85,14 @@ class ChatCacheManager:
         self.cache_redis = cache_redis
         self.search_redis = search_redis
 
-    async def add_user_to_room(self, user_id: str) -> set[str]:
+    async def add_user_to_chats(self, user_id: str) -> set[str]:
         async with self.cache_redis.pipeline() as pipe:
             pipe.sadd(f"chats:online", user_id)
             pipe.smembers(name=f"users:{user_id}:chats")
             results = await pipe.execute()
         return results[1]
 
-    async def remove_user_from_room(self, user_id: str):
+    async def remove_user_from_chats(self, user_id: str):
         async with self.cache_redis.pipeline() as pipe:
             pipe.srem(f"chats:online", user_id)
             pipe.smembers(name=f"users:{user_id}:chats")
@@ -114,7 +114,6 @@ class ChatCacheManager:
 
     async def get_chat_tiles(self, user_id: str) -> ChatTileResponseSchema:
         chat_ids = await self.cache_redis.smembers(f"users:{user_id}:chats")
-        my_logger.debug(f"chat_ids: {chat_ids}")
         if not chat_ids:
             return ChatTileResponseSchema(chat_tiles=[], end=0)
 
@@ -122,10 +121,8 @@ class ChatCacheManager:
             for chat_id in chat_ids:
                 pipe.hgetall(f"chats:{chat_id}")
             chats: list[dict] = await pipe.execute()
-            my_logger.debug(f"chats: {chats}")
 
         participant_ids = [chat.get('author_id') for chat in chats if chat]
-        my_logger.debug(f"participant_ids: {participant_ids}")
         if not participant_ids:
             return ChatTileResponseSchema(chat_tiles=[], end=0)
 
@@ -133,10 +130,8 @@ class ChatCacheManager:
             for pid in participant_ids:
                 pipe.hgetall(f"users:{pid}:profile")
             participants: list[dict] = await pipe.execute()
-            my_logger.debug(f"participants: {participants}")
 
         statuses: list[bool] = (await self.cache_redis.smismember("chats:home", *participant_ids) if participant_ids else [])
-        my_logger.debug(f"statuses: {statuses}")
 
         if not (len(chats) == len(participants) == len(statuses)):
             raise RuntimeError("Data mismatch while resolving chat tiles")
@@ -151,7 +146,7 @@ class ChatCacheManager:
 
     async def delete_chat_tile(self, user_id: str, chat_id: str):
         await self.cache_redis.srem(f"users:{user_id}:chats", chat_id)
-        await self.cache_redis.hdel(name=f"chats:{chat_id}")
+        await self.cache_redis.delete(f"chats:{chat_id}")
 
     async def set_chat(self, user_id: str, chat_id: str):
         await self.cache_redis.sadd(f"users:{user_id}:chats", chat_id)
@@ -209,17 +204,12 @@ class CacheManager:
 
     async def create_feed(self, mapping: dict, max_gt: int = 360, max_ft: int = 120, max_ut: int = 120):
         try:
-            author_id: str = mapping.get("author", {}).get("id", "")
+            author_id: str = mapping.pop("author", {}).get("id", "")
             feed_id: str = mapping.get("id", "")
             parent_id: Optional[str] = mapping.get("parent_id", None)
             created_at: float = mapping.get("created_at", time.time())
 
-            # Optional cleanup
-            if "author" in mapping:
-                mapping.pop("author")
-            if "image_urls" in mapping and isinstance(mapping["image_urls"], list):
-                mapping["image_urls"] = json.dumps(mapping["image_urls"])
-            mapping["author_id"] = author_id
+            mapping.update({"author_id": author_id})
 
             if parent_id is not None:
                 # Determine if parent is feed or comment
@@ -279,68 +269,76 @@ class CacheManager:
             return
 
     async def delete_feed(self, author_id: str, feed_id: str):
+        my_logger.warning(f"Deleting feed: author_id={author_id}, feed_id={feed_id}")
         is_feed = await self.cache_redis.exists(f"feeds:{feed_id}:meta") > 0
         is_comment = not is_feed
 
         try:
-            # Get all nested comment IDs (including top-level if comment)
-            all_comment_ids: set[str] = await self.get_all_nested_comment_ids(feed_id, is_feed=is_feed)
-
+            # Get all nested comment IDs
+            comment_ids = await self.get_all_nested_comment_ids(feed_id, is_feed=is_feed)
             if is_comment:
-                all_comment_ids.add(feed_id)
+                comment_ids.add(feed_id)
 
-            # Get authors of each comment
+            # Get comment authors
             async with self.cache_redis.pipeline() as pipe:
-                for cid in all_comment_ids:
+                for cid in comment_ids:
                     pipe.get(f"comments:{cid}:author_id")
-                author_results = await pipe.execute()
-            author_ids: list[str] = author_results
+                author_ids = await pipe.execute()
 
-            # Delete comment engagements + metadata
+            # Delete comments and their engagement links
             async with self.cache_redis.pipeline() as pipe:
-                for cid, aid in zip(all_comment_ids, author_ids):
-                    pipe.srem(f"users:{aid}:comments", cid)
-
-                    # Delete all engagement metrics and relationships
+                for cid, aid in zip(comment_ids, author_ids):
                     for suffix in ["comments", "reposts", "quotes", "likes", "views", "bookmarks"]:
                         pipe.delete(f"comments:{cid}:{suffix}")
+                        pipe.srem(f"users:{aid}:comments", cid)
+                        pipe.srem(f"users:{aid}:{suffix}", cid)
                     pipe.delete(f"comments:{cid}:author_id")
                     pipe.delete(f"comments:{cid}:parent_id")
                     pipe.delete(f"comments:{cid}:comments")
                 await pipe.execute()
 
-            # Feed deletion
             if is_feed:
-                follower_ids: set[str] = await self.cache_redis.smembers(f"users:{author_id}:followers")
+                suffixes = ["comments", "reposts", "quotes", "likes", "views", "bookmarks"]
 
+                # Get all users who interacted with this feed
+                engagement_map = {
+                    suffix: await self.cache_redis.smembers(f"feeds:{feed_id}:{suffix}")
+                    for suffix in suffixes
+                }
+
+                # Remove the feed ID from user:<user_id>:<suffix> sets
                 async with self.cache_redis.pipeline() as pipe:
                     pipe.zrem("global_timeline", feed_id)
-                    pipe.zrem(f"users:{author_id}:following_timeline", feed_id)
                     pipe.zrem(f"users:{author_id}:user_timeline", feed_id)
+                    pipe.zrem(f"users:{author_id}:following_timeline", feed_id)
+
+                    # Remove from followers' timelines
+                    follower_ids = await self.cache_redis.smembers(f"users:{author_id}:followers")
                     for follower_id in follower_ids:
                         pipe.zrem(f"users:{follower_id}:following_timeline", feed_id)
 
-                    pipe.hdel(name=f"feeds:{feed_id}:meta")
+                    # Remove feed from all engagement sets
+                    for suffix, user_ids in engagement_map.items():
+                        for user_id in user_ids:
+                            pipe.srem(f"users:{user_id}:{suffix}", feed_id)
+                        pipe.delete(f"feeds:{feed_id}:{suffix}")
 
-                    for suffix in ["comments", "reposts", "quotes", "likes", "views", "bookmarks"]:
-                        pipe.srem(f"users:{author_id}:{suffix}", feed_id)
-                        pipe.srem(f"feeds:{feed_id}:{suffix}", author_id)
-
-                    # Decrement user's own feeds_count
-                    pipe.hincrby(name=f"users:{author_id}:profile", key="feeds_count", amount=-1)
+                    # Feed metadata and user’s post counter
+                    pipe.delete(f"feeds:{feed_id}:meta")
+                    pipe.hincrby(f"users:{author_id}:profile", key="feeds_count", amount=-1)
 
                     await pipe.execute()
-
             else:
-                # It was a comment — remove from its parent's comment set
+                # Handle comment unlinking from parent
                 parent_id = await self.cache_redis.get(f"comments:{feed_id}:parent_id")
                 if parent_id:
                     is_parent_feed = await self.cache_redis.exists(f"feeds:{parent_id}:meta") > 0
                     prefix = "feeds" if is_parent_feed else "comments"
                     await self.cache_redis.srem(f"{prefix}:{parent_id}:comments", feed_id)
+
         except Exception as e:
-            my_logger.error(f"Exception while deleting feed: {e}")
-            raise ValueError(f"Exception while deleting feed: {e}")
+            my_logger.error(f"Exception during feed deletion: {e}")
+            raise ValueError(f"Failed to delete feed {feed_id}: {e}")
 
     async def get_all_nested_comment_ids(self, feed_id: str, is_feed: bool = False) -> set[str]:
         collected = set()
@@ -369,12 +367,6 @@ class CacheManager:
         for feed_meta in feed_metas:
             if not feed_meta:
                 continue
-
-            # Convert image_urls field
-            if "image_urls" in feed_meta:
-                feed_meta["image_urls"] = json.loads(feed_meta["image_urls"])
-            else:
-                feed_meta["image_urls"] = []
 
             feeds.append(feed_meta)
 
@@ -473,7 +465,6 @@ class CacheManager:
 
     async def create_profile(self, mapping: dict, user_id: Optional[str] = None, is_following: Optional[str] = None):
         try:
-            my_logger.debug(f"mapping in create_profile: {mapping}, type: {type(mapping)}")
 
             uid = mapping.get("id")
             async with self.cache_redis.pipeline() as pipe:
@@ -546,14 +537,8 @@ class CacheManager:
 
         async with my_cache_redis.pipeline() as pipe:
             # Remove user profile
-            pipe.hdel(f"users:{user_id}:profile")
-
-            # Remove user timelines
-            pipe.hdel(f"users:{user_id}:user_timeline")
-            pipe.hdel(f"user:{user_id}:following_timeline")
-
-            pipe.hdel(f"users:{user_id}:followers")
-            pipe.hdel(f"users:{user_id}:followings")
+            pipe.delete(f"users:{user_id}:profile", f"users:{user_id}:user_timeline", f"user:{user_id}:following_timeline", f"users:{user_id}:followers",
+                        f"users:{user_id}:followings")
 
             # Remove follow relationships
             for follower_id in followers:
@@ -570,37 +555,41 @@ class CacheManager:
                     pipe.zrem(f"users:{follower_id}:home_timeline", feed_id)
 
                 # Delete feed metadata and stats
-                pipe.delete(f"feeds:{feed_id}:meta", f"feeds:{feed_id}:stats")
+                pipe.delete(f"feeds:{feed_id}:meta")
             await pipe.execute()
+
+            for feed_id in feed_ids:
+                await self.delete_feed(author_id=user_id, feed_id=feed_id)
 
     async def get_profile_avatar_url(self, user_id: str) -> Optional[str]:
         return await self.cache_redis.hget(name=f"users:{user_id}:profile", key="avatar")
 
         # ******************************************************************** FOLLOW MANAGEMENT ********************************************************************
 
-    async def add_follower(self, user_id: str, following_id: str):
-        """Add a follower or multiple followers to the user."""
+    async def add_follower(self, user_id: str, following_id: str, max_ft: int = 120):
+        following_feed_ids: list[tuple[str, float]] = await self.cache_redis.zrange(name=f"users:{following_id}:user_timeline", start=0, end=-1, withscores=True)
         async with self.cache_redis.pipeline() as pipe:
             pipe.sadd(f"users:{following_id}:followers", user_id)
             pipe.sadd(f"users:{user_id}:followings", following_id)
             pipe.hincrby(name=f"users:{following_id}:profile", key="followers_count")
             pipe.hincrby(name=f"users:{user_id}:profile", key="followings_count")
+
+            if following_feed_ids:
+                mapping: dict[str, float] = {feed_id: score for feed_id, score in following_feed_ids}
+                pipe.zadd(f"users:{user_id}:following_timeline", mapping)
+                pipe.zremrangebyrank(name=f"users:{user_id}:following_timeline", min=0, max=-max_ft - 1)
             await pipe.execute()
 
     async def remove_follower(self, user_id: str, following_id: str):
-        """Remove a follower relationship."""
-        # Get all feeds made by the following
-        following_feed_ids: list[str] = await self.cache_redis.lrange(name=f"users:{following_id}:timeline", start=0, end=-1)
-
+        following_feed_ids: list[str] = await self.cache_redis.zrange(name=f"users:{following_id}:user_timeline", start=0, end=-1)
         async with self.cache_redis.pipeline() as pipe:
-            # Remove the follower relationship
             pipe.srem(f"users:{following_id}:followers", user_id)
             pipe.srem(f"users:{user_id}:followings", following_id)
             pipe.hincrby(name=f"users:{following_id}:profile", key="followers_count", amount=-1)
             pipe.hincrby(name=f"users:{user_id}:profile", key="followings_count", amount=-1)
 
             if following_feed_ids:
-                pipe.zrem(f"users:{user_id}:user_timeline", *following_feed_ids)
+                pipe.zrem(f"users:{user_id}:following_timeline", *following_feed_ids)
             await pipe.execute()
 
     async def get_followers(self, user_id: str) -> set[str]:
@@ -666,14 +655,11 @@ class CacheManager:
                 if uid[1] != user_id:
                     user_ids.append(uid[1])
                 users.append(document.properties)
-            my_logger.debug(f"user_id: {user_id}, user_ids: {user_ids}")
             if user_id is not None:
                 async with self.cache_redis.pipeline() as pipe:
                     for uid in user_ids:
                         pipe.sismember(name=f"users:{uid}:followers", value=user_id)
                     is_followings = await pipe.execute()
-
-                my_logger.debug(f"is_followings: {is_followings}")
 
                 for user, is_following in zip(users, is_followings):
                     if user:
@@ -694,7 +680,6 @@ class CacheManager:
             if len(fid) < 2:
                 continue
             feed_ids.append(fid[1])
-        my_logger.debug(f"feed_ids: {feed_ids}")
 
         feeds = await self._get_feeds(user_id=user_id, feed_ids=feed_ids)
         return {"feeds": feeds, "end": results.total}
@@ -727,30 +712,27 @@ class CacheManager:
         is_email_exists = await self.cache_redis.hexists(name="user:emails", key=email)
         return is_username_exists, is_email_exists
 
-    async def add_online_users_in_chat(self, user_id):
-        await self.cache_redis.sadd("online_users_in_chat", user_id)
+    async def add_user_to_feeds(self, user_id):
+        await self.cache_redis.sadd("feeds:online", user_id)
 
-    async def remove_online_users_in_chat(self, user_id):
-        await self.cache_redis.srem("online_users_in_chat", user_id)
+    async def remove_user_from_feeds(self, user_id):
+        await self.cache_redis.srem("feeds:online", user_id)
 
-    async def get_online_users_in_chat(self) -> set[str]:
-        return await self.cache_redis.smembers("online_users_in_chat")
-
-    async def add_online_users_in_home_timeline(self, user_id):
-        await self.cache_redis.sadd("online_users_in_home_timeline", user_id)
-
-    async def remove_online_users_in_home_timeline(self, user_id):
-        await self.cache_redis.srem("online_users_in_home_timeline", user_id)
-
-    async def get_online_users_in_home_timeline(self) -> set[str]:
-        return await self.cache_redis.smembers("online_users_in_home_timeline")
+    async def get_users_from_feeds(self) -> set[str]:
+        return await self.cache_redis.smembers("feeds:online")
 
 
-def _scores_getter(stats: dict) -> tuple[int, int, int, int, int, int]:
+def _scores_getter(stats: dict[str, int]) -> tuple[int, int, int, int, int, int]:
     return stats.get("comments", 0), stats.get("reposts", 0), stats.get("quotes", 0), stats.get("likes", 0), stats.get("views", 0), stats.get("bookmarks", 0)
 
 
-def _calculate_score(stats_dict: dict, created_at: float, half_life: float = 36, boost_factor: int = 12) -> float:
+def _calculate_score(stats_dict: dict[str, int], created_at: float) -> float:
+    comments, reposts, quotes, likes, views, bookmarks = _scores_getter(stats=stats_dict)
+    engagement_score = math.log(1 + (comments + reposts + quotes) * 5 + likes * 2 + views * 0.5)
+    return created_at + (engagement_score * 100)
+
+
+def _calculate_score_old(stats_dict: dict, created_at: float, half_life: float = 36, boost_factor: int = 12) -> float:
     comments, likes, reposts, quotes, views, bookmarks = _scores_getter(stats=stats_dict)
     age_hours = (time.time() - created_at) / 3600
 
