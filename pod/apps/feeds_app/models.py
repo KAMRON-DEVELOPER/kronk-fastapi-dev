@@ -56,7 +56,7 @@ class FeedModel(BaseModel):
     category: Mapped[Optional["CategoryModel"]] = relationship(argument="CategoryModel", back_populates="feeds")
     tag_links: Mapped[list["FeedTagLink"]] = relationship(back_populates="feed", overlaps="feeds, tags", cascade="all, delete-orphan")
     tags: Mapped[list["TagModel"]] = relationship(secondary="feed_tag_link_table", back_populates="feeds", overlaps="feed_links,feed,tag")
-    engagements: Mapped[list["EngagementModel"]] = relationship(argument="EngagementModel", back_populates="feed", cascade="all, delete-orphan", passive_deletes=True)
+    engagements: Mapped[list["EngagementModel"]] = relationship(argument="EngagementModel", back_populates="feed", cascade="all, delete-orphan")
     reports: Mapped[list["ReportModel"]] = relationship(argument="ReportModel", back_populates="feed", cascade="all, delete-orphan", passive_deletes=True)
 
     def __repr__(self):
@@ -66,8 +66,8 @@ class FeedModel(BaseModel):
 class EngagementModel(BaseModel):
     __tablename__ = "engagement_table"
     __table_args__ = (UniqueConstraint("user_id", "feed_id", "engagement_type", name="uq_feed_engagement"),)
-    user_id: Mapped[UUID] = mapped_column(ForeignKey("user_table.id", ondelete="CASCADE"))
-    feed_id: Mapped[UUID] = mapped_column(ForeignKey("feed_table.id", ondelete="CASCADE"))
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("user_table.id", ondelete="CASCADE"), nullable=False)
+    feed_id: Mapped[UUID] = mapped_column(ForeignKey("feed_table.id", ondelete="CASCADE"), nullable=False)
     engagement_type: Mapped[EngagementType] = mapped_column(Enum(EngagementType, name="engagement_type"), nullable=False)
     user: Mapped["UserModel"] = relationship(argument="UserModel", back_populates="engagements", passive_deletes=True)
     feed: Mapped["FeedModel"] = relationship(argument="FeedModel", back_populates="engagements", passive_deletes=True)
@@ -79,8 +79,8 @@ class EngagementModel(BaseModel):
 class ReportModel(BaseModel):
     __tablename__ = "report_table"
     __table_args__ = (UniqueConstraint("user_id", "feed_id", "report_reason", name="uq_feed_report"),)
-    user_id: Mapped[UUID] = mapped_column(ForeignKey("user_table.id", ondelete="CASCADE"))
-    feed_id: Mapped[UUID] = mapped_column(ForeignKey("feed_table.id", ondelete="CASCADE"))
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("user_table.id", ondelete="CASCADE"), nullable=False)
+    feed_id: Mapped[UUID] = mapped_column(ForeignKey("feed_table.id", ondelete="CASCADE"), nullable=False)
     report_reason: Mapped[ReportReason] = mapped_column(Enum(ReportReason, name="report_reason"), nullable=False)
-    user: Mapped["UserModel"] = relationship(argument="UserModel", back_populates="reports")
+    user: Mapped["UserModel"] = relationship(argument="UserModel", back_populates="reports", passive_deletes=True)
     feed: Mapped["FeedModel"] = relationship(argument="FeedModel", back_populates="reports")

@@ -68,7 +68,7 @@ class UserModel(BaseModel):
     )
     feeds: Mapped[list["FeedModel"]] = relationship(argument="FeedModel", back_populates="author")
     engagements: Mapped[list["EngagementModel"]] = relationship(argument="EngagementModel", back_populates="user", passive_deletes=True)
-    reports: Mapped[list["ReportModel"]] = relationship(argument="ReportModel", back_populates="user")
+    reports: Mapped[list["ReportModel"]] = relationship(argument="ReportModel", back_populates="user", passive_deletes=True)
 
     group_participants: Mapped[list["GroupParticipantModel"]] = relationship(argument="GroupParticipantModel", back_populates="user")
     groups: Mapped[list["GroupModel"]] = relationship(secondary="group_participant_table", back_populates="users", viewonly=True)

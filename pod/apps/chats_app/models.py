@@ -41,7 +41,7 @@ class GroupModel(BaseModel):
     description: Mapped[Optional[str]] = mapped_column(String(length=200), nullable=True)
     group_type: Mapped["GroupType"] = mapped_column(Enum(GroupType, name="group_type"), default=GroupType.public)
     last_message_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
-    group_messages: Mapped[list["GroupMessageModel"]] = relationship(back_populates="group", cascade="all, delete-orphan")
+    group_messages: Mapped[list["GroupMessageModel"]] = relationship(back_populates="group", passive_deletes=True)
     group_participants: Mapped[list["GroupParticipantModel"]] = relationship(argument="GroupParticipantModel", back_populates="group", cascade="all, delete-orphan")
     users: Mapped[list["UserModel"]] = relationship(secondary="group_participant_table", back_populates="groups", viewonly=True)
     members_count: Mapped[int] = column_property(select(func.count(GroupParticipantModel.id)).where(text("group_id = id")).scalar_subquery())
