@@ -115,10 +115,7 @@ class WebSocketContextManager:
     async def _connect(self):
         await self.connect_handler(self.user_id, self.websocket)
         self.pubsub = await self.pubsub_generator(self.user_id)
-        self.tasks = [
-            asyncio.create_task(self._pubsub_listener()),
-            asyncio.create_task(self._websocket_receiver())
-        ]
+        self.tasks = [asyncio.create_task(self._pubsub_listener()), asyncio.create_task(self._websocket_receiver())]
 
     async def _disconnect(self):
         if self.pubsub:
@@ -162,12 +159,13 @@ class WebSocketContextManager:
                     continue
 
                 pubsub_data = message.get("data")
+                my_logger.warning(f"data in message in _pubsub_listener: {message.get('data')}")
                 if pubsub_data is None:
                     continue
 
                 try:
                     if isinstance(pubsub_data, bytes):
-                        pubsub_data = pubsub_data.decode("utf-8")
+                        pubsub_data: str = pubsub_data.decode("utf-8")
                     data: dict = json.loads(pubsub_data)
                 except (TypeError, json.JSONDecodeError, UnicodeDecodeError) as e:
                     my_logger.error(f"Failed to decode pubsub message: {e}")
@@ -205,12 +203,11 @@ class WebSocketContextManager:
     async def _websocket_receiver(self):
         """Receive incoming WebSocket messages and handle heartbeat checks."""
         last_activity = time.time()
-        received_json: Optional[dict] = None
 
         try:
             while self.websocket.client_state == WebSocketState.CONNECTED:
                 try:
-                    received_json = await asyncio.wait_for(self.websocket.receive_json(), timeout=30.0)
+                    received_json = await asyncio.wait_for(self.websocket.receive_json(), timeout=3600)
                     last_activity = time.time()
                 except asyncio.TimeoutError:
                     if time.time() - last_activity > 60:
@@ -246,11 +243,6 @@ class WebSocketContextManager:
                 except ValueError:
                     my_logger.exception(f"Invalid event type received: '{event_type}'")
                     await self.websocket.send_json({"detail": f"Invalid event type: '{event_type}'."})
-                    continue
-
-                if "participant_id" not in received_json:
-                    my_logger.exception("Participant ID is required.")
-                    await self.websocket.send_json({"detail": "Participant ID is required."})
                     continue
 
                 await pubsub_manager.publish(topic=f"chats:home:{self.user_id}", data=received_json)

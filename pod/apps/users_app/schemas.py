@@ -115,7 +115,7 @@ class ProfileSchema(BaseModel):
 
     class Config:
         from_attributes = True
-        json_encoders = {UUID: lambda v: v.hex, datetime: lambda v: v.timestamp() if v is not None else None}
+        json_encoders = {UUID: lambda v: v.hex, datetime: lambda v: int(v.timestamp()) if v is not None else None}
 
 
 class ProfileUpdateSchema(BaseModel):
@@ -134,7 +134,7 @@ class ProfileUpdateSchema(BaseModel):
     class Config:
         use_enum_values = True
         from_attributes = True
-        json_encoders = {UUID: lambda v: v.hex, datetime: lambda v: v.timestamp() if v is not None else None}
+        json_encoders = {UUID: lambda v: v.hex, datetime: lambda v: int(v.timestamp()) if v is not None else None}
 
     @field_validator("username")
     def validate_username(cls, value: Optional[str]):

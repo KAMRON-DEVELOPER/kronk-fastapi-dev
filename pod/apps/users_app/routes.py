@@ -431,7 +431,4 @@ async def cache_profile(user: UserModel, user_id: Optional[str] = None, is_follo
     if is_following is not None:
         mapping.update({"is_following": is_following})
 
-    my_logger.debug("profile caching to redis...")
-    my_logger.debug(f"mapping: {mapping}")
-
     return {"user": mapping, "tokens": generate_tokens(user_id=user.id.hex)}

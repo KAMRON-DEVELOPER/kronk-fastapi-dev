@@ -1,7 +1,7 @@
 import json
 import math
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone, UTC
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -13,7 +13,7 @@ from coredis.modules.search import Field
 from redis.asyncio import Redis as CacheRedis
 from redis.asyncio.client import PubSub
 
-from apps.chats_app.schemas import ChatTileSchema, ParticipantSchema, ChatTileResponseSchema
+from apps.chats_app.schemas import ChatSchema, ParticipantSchema, ChatResponseSchema
 from settings.my_config import get_settings
 from utility.my_enums import EngagementType
 from utility.my_logger import my_logger
@@ -85,17 +85,78 @@ class ChatCacheManager:
         self.cache_redis = cache_redis
         self.search_redis = search_redis
 
+    async def create_chat(self, user_id: str, participant_id: str, chat_id: str, mapping: dict):
+        async with self.cache_redis.pipeline() as pipe:
+            pipe.zadd(name=f"users:{user_id}:chats", mapping={chat_id: datetime.now(UTC).timestamp()})
+            pipe.zadd(name=f"users:{participant_id}:chats", mapping={chat_id: datetime.now(UTC).timestamp()})
+            pipe.hset(name=f"chats:{chat_id}", mapping=mapping)
+            pipe.sadd(f"chats:{chat_id}", user_id, participant_id)
+            await pipe.execute()
+
+    async def delete_chat(self, participants: list[str], chat_id: str):
+        async with self.cache_redis.pipeline() as pipe:
+            for pid in participants:
+                pipe.zrem(f"users:{pid}:chats", chat_id)
+            pipe.delete(f"chats:{chat_id}")
+            await pipe.execute()
+
+    async def get_chats(self, user_id: str, start: int = 0, end: int = 20) -> ChatResponseSchema:
+        chat_ids: list[str] = await self.cache_redis.zrevrange(name=f"users:{user_id}:chats", start=start, end=end)
+        my_logger.warning(f"chat_ids: {chat_ids}")
+        if not chat_ids:
+            return ChatResponseSchema(chats=[], end=0)
+
+        async with self.cache_redis.pipeline() as pipe:
+            for chat_id in chat_ids:
+                pipe.hgetall(f"chats:{chat_id}")
+            chats: list[dict] = await pipe.execute()
+        my_logger.warning(f"chats: {chats}")
+
+        participant_ids = []
+        for chat in chats:
+            participant: set[str] = chat.get("participants", set())
+            participant.discard(user_id)
+            participant_ids.append(participant)
+        if not participant_ids:
+            return ChatResponseSchema(chats=[], end=0)
+        my_logger.warning(f"participant_ids: {participant_ids}")
+
+        async with self.cache_redis.pipeline() as pipe:
+            for pid in participant_ids:
+                pipe.hgetall(f"users:{pid}:profile")
+            participants: list[dict] = await pipe.execute()
+
+        statuses: list[bool] = await self.cache_redis.smismember("chats:online", *participant_ids)
+
+        if not (len(chats) == len(participants) == len(statuses)):
+            raise RuntimeError("Data mismatch while resolving chat tiles")
+
+        chat = [ChatSchema(**c, participant=ParticipantSchema(**p, is_online=s)) for c, p, s in zip(chats, participants, statuses)]
+
+        end = len(chat_ids)
+        return ChatResponseSchema(chats=chat, end=end)
+
+    async def is_user_chat_owner(self, user_id: str, chat_id: str) -> bool:
+        score: Optional[float] = await self.cache_redis.zscore(name=f"users:{user_id}:chats", value=chat_id)
+        return False if score is None else True
+
+    async def is_online(self, participant_id: str) -> bool:
+        return bool(await self.cache_redis.sismember(name="chats:online", value=participant_id))
+
+    ''' ****************************************** EVENTS ****************************************** '''
+
     async def add_user_to_chats(self, user_id: str) -> set[str]:
         async with self.cache_redis.pipeline() as pipe:
             pipe.sadd(f"chats:online", user_id)
-            pipe.smembers(name=f"users:{user_id}:chats")
+            pipe.zrevrange(name=f"users:{user_id}:chats", start=0, end=-1)
             results = await pipe.execute()
         return results[1]
 
-    async def remove_user_from_chats(self, user_id: str):
+    async def remove_user_from_chats(self, user_id: str) -> set[str]:
         async with self.cache_redis.pipeline() as pipe:
             pipe.srem(f"chats:online", user_id)
-            pipe.smembers(name=f"users:{user_id}:chats")
+            pipe.zrevrange(name=f"users:{user_id}:chats", start=0, end=-1)
+            pipe.hset(f"users:{user_id}:profile", key="last_seen_at", value=int(datetime.now(UTC).timestamp()))
             results = await pipe.execute()
         return results[1]
 
@@ -105,51 +166,11 @@ class ChatCacheManager:
     async def remove_typing(self, user_id: str, chat_id: str):
         await self.cache_redis.srem(f"typing:{chat_id}", user_id)
 
-    async def create_chat_tile(self, mapping: dict):
-        chat_id = mapping.get("chat_id", "")
-        user_id = mapping.get("user_id", "")
-        if not chat_id or not user_id:
-            raise ValueError("chat_id and user_id must be present in mapping.")
-        await self.cache_redis.hset(name=f"chat_tile:{chat_id}", mapping=mapping)
+    async def get_chat_participants(self, chat_id: str) -> set[str]:
+        return await self.cache_redis.smembers(f"chats:{chat_id}:participants")
 
-    async def get_chat_tiles(self, user_id: str) -> ChatTileResponseSchema:
-        chat_ids = await self.cache_redis.smembers(f"users:{user_id}:chats")
-        if not chat_ids:
-            return ChatTileResponseSchema(chat_tiles=[], end=0)
-
-        async with self.cache_redis.pipeline() as pipe:
-            for chat_id in chat_ids:
-                pipe.hgetall(f"chats:{chat_id}")
-            chats: list[dict] = await pipe.execute()
-
-        participant_ids = [chat.get('author_id') for chat in chats if chat]
-        if not participant_ids:
-            return ChatTileResponseSchema(chat_tiles=[], end=0)
-
-        async with self.cache_redis.pipeline() as pipe:
-            for pid in participant_ids:
-                pipe.hgetall(f"users:{pid}:profile")
-            participants: list[dict] = await pipe.execute()
-
-        statuses: list[bool] = (await self.cache_redis.smismember("chats:home", *participant_ids) if participant_ids else [])
-
-        if not (len(chats) == len(participants) == len(statuses)):
-            raise RuntimeError("Data mismatch while resolving chat tiles")
-
-        chat_tiles = [
-            ChatTileSchema(**chat, participant=ParticipantSchema(**participant, is_online=status))
-            for chat, participant, status in zip(chats, participants, statuses)
-        ]
-
-        end = len(chat_ids)
-        return ChatTileResponseSchema(chat_tiles=chat_tiles, end=end)
-
-    async def delete_chat_tile(self, user_id: str, chat_id: str):
-        await self.cache_redis.srem(f"users:{user_id}:chats", chat_id)
-        await self.cache_redis.delete(f"chats:{chat_id}")
-
-    async def set_chat(self, user_id: str, chat_id: str):
-        await self.cache_redis.sadd(f"users:{user_id}:chats", chat_id)
+    async def get_user_chat_ids(self, user_id: str) -> list[str]:
+        return await self.cache_redis.zrevrange(f"users:{user_id}:chats", start=0, end=-1)
 
 
 class CacheManager:
@@ -516,7 +537,6 @@ class CacheManager:
 
     async def get_profile(self, user_id: str, target_user_id: Optional[str] = None) -> Optional[dict]:
         async with self.cache_redis.pipeline() as pipe:
-            my_logger.info(f"user_id: {user_id}, target_user_id: {target_user_id}, type: {type(target_user_id)}")
             key = target_user_id or user_id
             pipe.hgetall(name=f"users:{key}:profile")
             if target_user_id is not None:
@@ -526,7 +546,6 @@ class CacheManager:
         user_dict: dict = results[0]
         if target_user_id is not None:
             user_dict.update({"is_following": results[1]})
-        my_logger.info(f"user_dict: {user_dict}")
         return user_dict if user_dict else None
 
     async def delete_profile(self, user_id: str):

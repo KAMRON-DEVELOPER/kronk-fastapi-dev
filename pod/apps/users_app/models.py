@@ -66,14 +66,14 @@ class UserModel(BaseModel):
     followings: Mapped[list["FollowModel"]] = relationship(
         argument="FollowModel", back_populates="follower", foreign_keys="[FollowModel.follower_id]", cascade="all, delete-orphan"
     )
-    feeds: Mapped[list["FeedModel"]] = relationship(argument="FeedModel", back_populates="author")
+    feeds: Mapped[list["FeedModel"]] = relationship(argument="FeedModel", back_populates="author", passive_deletes=True)
     engagements: Mapped[list["EngagementModel"]] = relationship(argument="EngagementModel", back_populates="user", passive_deletes=True)
     reports: Mapped[list["ReportModel"]] = relationship(argument="ReportModel", back_populates="user", passive_deletes=True)
 
-    group_participants: Mapped[list["GroupParticipantModel"]] = relationship(argument="GroupParticipantModel", back_populates="user")
+    group_participants: Mapped[list["GroupParticipantModel"]] = relationship(argument="GroupParticipantModel", back_populates="user", passive_deletes=True)
     groups: Mapped[list["GroupModel"]] = relationship(secondary="group_participant_table", back_populates="users", viewonly=True)
     group_messages: Mapped[list["GroupMessageModel"]] = relationship(argument="GroupMessageModel", back_populates="sender")
-    chat_participants: Mapped[list["ChatParticipantModel"]] = relationship(argument="ChatParticipantModel", back_populates="user")
+    chat_participants: Mapped[list["ChatParticipantModel"]] = relationship(argument="ChatParticipantModel", back_populates="user", passive_deletes=True)
     chats: Mapped[list["ChatModel"]] = relationship(secondary="chat_participant_table", back_populates="users", viewonly=True)
     chat_messages: Mapped[list["ChatMessageModel"]] = relationship(argument="ChatMessageModel", back_populates="sender")
 

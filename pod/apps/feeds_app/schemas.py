@@ -15,7 +15,7 @@ class AuthorSchema(BaseModel):
 
     class Config:
         from_attributes = True
-        json_encoders = {UUID: lambda v: v.hex, datetime: lambda v: v.timestamp() if v is not None else None}
+        json_encoders = {UUID: lambda v: v.hex, datetime: lambda v: int(v.timestamp()) if v is not None else None}
 
 
 class EngagementSchema(BaseModel):
@@ -65,7 +65,7 @@ class FeedSchema(BaseModel):
 
     class Config:
         from_attributes = True
-        json_encoders = {UUID: lambda v: v.hex, datetime: lambda v: v.timestamp() if v is not None else None}
+        json_encoders = {UUID: lambda v: v.hex, datetime: lambda v: int(v.timestamp()) if v is not None else None}
 
 
 class FeedResponseSchema(BaseModel):

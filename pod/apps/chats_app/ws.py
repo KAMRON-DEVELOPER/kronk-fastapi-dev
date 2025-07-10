@@ -45,6 +45,8 @@ async def chat_connect(user_id: str, websocket: WebSocket):
 
 async def chat_disconnect(user_id: str, websocket: WebSocket):
     await chat_ws_manager.disconnect(user_id=user_id, websocket=websocket)
+
+    # Notify participants
     participant_ids: set[str] = await chat_cache_manager.remove_user_from_chats(user_id)
     data = {"type": ChatEvent.goes_offline.value, "participant_id": user_id}
     tasks = [pubsub_manager.publish(topic=f"chats:home:{pid}", data=data) for pid in participant_ids]
@@ -53,6 +55,31 @@ async def chat_disconnect(user_id: str, websocket: WebSocket):
 
 async def chat_pubsub_generator(user_id: str) -> PubSub:
     return await pubsub_manager.subscribe(topic=f"chats:home:{user_id}")
+
+
+# Outgoing(user sending) handler
+async def handle_outgoing_event(chat_event: ChatEvent, user_id: str, data: dict):
+    match chat_event:
+        case ChatEvent.typing_start:
+            chat_id = data.get("chat_id")
+            await chat_cache_manager.add_typing(user_id, chat_id)
+            participant_ids: set[str] = await chat_cache_manager.get_chat_participants(chat_id=chat_id)
+            participant_ids.discard(user_id)
+            for pid in participant_ids:
+                await pubsub_manager.publish(f"chats:home:{pid}", data)
+        case ChatEvent.typing_start:
+            chat_id = data.get("chat_id")
+            await chat_cache_manager.add_typing(user_id, chat_id)
+            participant_ids: set[str] = await chat_cache_manager.get_chat_participants(chat_id=chat_id)
+            participant_ids.discard(user_id)
+            for pid in participant_ids:
+                await pubsub_manager.publish(f"chats:home:{pid}", data)
+        case ChatEvent.sent_message:
+            chat_id = data.get("chat_id")
+            # TODO Save to DB here
+            participant_ids: set[str] = await chat_cache_manager.get_chat_participants(chat_id=chat_id)
+            for pid in participant_ids:
+                await pubsub_manager.publish(f"chats:home:{pid}", data)
 
 
 # Event handlers
@@ -87,12 +114,12 @@ async def handle_exit_chat(user_id: str, data: dict):
 
 
 async def handle_sent_message(user_id: str, data: dict):
-    my_logger.debug(f"User sent message from {data.get('chat_id')} room")
+    my_logger.warning(f"data: {data}")
     await chat_ws_manager.send_personal_message(user_id=user_id, data=data)
 
 
 async def handle_created_chat(user_id: str, data: dict):
-    participant_id = data.get("participant_id")
-    chat_id = data.get("chat_id")
+    participant_id = data.get("participant", {}).get("id")
+    chat_id = data.get("id")
     my_logger.debug(f"User {participant_id} created a chat room (ID: {chat_id}) with you ({user_id})")
     await chat_ws_manager.send_personal_message(user_id=user_id, data=data)
