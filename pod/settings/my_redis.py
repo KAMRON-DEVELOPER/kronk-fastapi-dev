@@ -3,7 +3,7 @@ import math
 import time
 from datetime import date, datetime, timedelta, timezone, UTC
 from typing import Any, Optional
-from uuid import uuid4
+from uuid import uuid4, UUID
 
 from coredis import PureToken
 from coredis import Redis as SearchRedis
@@ -13,7 +13,7 @@ from coredis.modules.search import Field
 from redis.asyncio import Redis as CacheRedis
 from redis.asyncio.client import PubSub
 
-from apps.chats_app.schemas import ChatSchema, ParticipantSchema, ChatResponseSchema
+from apps.chats_app.schemas import ChatSchema, ParticipantSchema, ChatResponseSchema, ChatMessageSchema
 from settings.my_config import get_settings
 from utility.my_enums import EngagementType
 from utility.my_logger import my_logger
@@ -86,55 +86,87 @@ class ChatCacheManager:
         self.search_redis = search_redis
 
     async def create_chat(self, user_id: str, participant_id: str, chat_id: str, mapping: dict):
+        last_message: dict = mapping.pop("last_message")
         async with self.cache_redis.pipeline() as pipe:
             pipe.zadd(name=f"users:{user_id}:chats", mapping={chat_id: datetime.now(UTC).timestamp()})
             pipe.zadd(name=f"users:{participant_id}:chats", mapping={chat_id: datetime.now(UTC).timestamp()})
-            pipe.hset(name=f"chats:{chat_id}", mapping=mapping)
-            pipe.sadd(f"chats:{chat_id}", user_id, participant_id)
+            pipe.hset(name=f"chats:{chat_id}:meta", mapping=mapping)
+            pipe.hset(name=f"chats:{chat_id}:last_message", mapping=last_message)
+            pipe.sadd(f"chats:{chat_id}:participants", user_id, participant_id)
             await pipe.execute()
 
     async def delete_chat(self, participants: list[str], chat_id: str):
         async with self.cache_redis.pipeline() as pipe:
             for pid in participants:
                 pipe.zrem(f"users:{pid}:chats", chat_id)
-            pipe.delete(f"chats:{chat_id}")
+                pipe.delete(f"chats:{chat_id}:meta")
+                pipe.delete(f"chats:{chat_id}:last_message")
+            pipe.srem(f"chats:{chat_id}:participants", *participants)
             await pipe.execute()
 
     async def get_chats(self, user_id: str, start: int = 0, end: int = 20) -> ChatResponseSchema:
         chat_ids: list[str] = await self.cache_redis.zrevrange(name=f"users:{user_id}:chats", start=start, end=end)
-        my_logger.warning(f"chat_ids: {chat_ids}")
         if not chat_ids:
             return ChatResponseSchema(chats=[], end=0)
 
         async with self.cache_redis.pipeline() as pipe:
             for chat_id in chat_ids:
-                pipe.hgetall(f"chats:{chat_id}")
-            chats: list[dict] = await pipe.execute()
-        my_logger.warning(f"chats: {chats}")
+                pipe.hgetall(f"chats:{chat_id}:meta")  # index 0, 3, 6...
+                pipe.hgetall(f"chats:{chat_id}:last_message")  # index 1, 4, 7...
+                pipe.smembers(f"chats:{chat_id}:participants")  # index 2, 5, 8...
+            results = await pipe.execute()
 
-        participant_ids = []
-        for chat in chats:
-            participant: set[str] = chat.get("participants", set())
-            participant.discard(user_id)
-            participant_ids.append(participant)
-        if not participant_ids:
-            return ChatResponseSchema(chats=[], end=0)
-        my_logger.warning(f"participant_ids: {participant_ids}")
+        my_logger.warning(f"results: {results}")
+
+        chats: list[dict] = results[::3]  # Every 3rd element starting at 0
+        last_messages: list[dict] = results[1::3]  # Every 3rd element starting at 1
+        participant_sets: list[set[str]] = results[2::3]  # Every 3rd element starting at 2
+
+        participant_ids: list[str] = []
+        for participant_set in participant_sets:
+            participant_set.discard(user_id)
+            pid: Optional[str] = next(iter(participant_set), None)
+            if not pid:
+                continue
+            participant_ids.append(pid)
 
         async with self.cache_redis.pipeline() as pipe:
             for pid in participant_ids:
                 pipe.hgetall(f"users:{pid}:profile")
-            participants: list[dict] = await pipe.execute()
+            for pid in participant_ids:
+                pipe.sismember("chats:online", pid)
+            piped_results = await pipe.execute()
 
-        statuses: list[bool] = await self.cache_redis.smismember("chats:online", *participant_ids)
+        profiles: list[dict] = piped_results[:len(participant_ids)]
+        statuses: list[bool] = piped_results[len(participant_ids):]
 
-        if not (len(chats) == len(participants) == len(statuses)):
-            raise RuntimeError("Data mismatch while resolving chat tiles")
+        chat_list = []
+        for chat_meta, last_msg, pid, profile, is_online in zip(chats, last_messages, participant_ids, profiles, statuses):
+            if not pid or not profile:
+                continue
 
-        chat = [ChatSchema(**c, participant=ParticipantSchema(**p, is_online=s)) for c, p, s in zip(chats, participants, statuses)]
+            chat = ChatSchema(
+                id=chat_meta.get("id"),
+                participant=ParticipantSchema(
+                    id=UUID(hex=pid),
+                    name=profile.get("name"),
+                    username=profile.get("username"),
+                    avatar_url=profile.get("avatar_url"),
+                    last_seen_at=datetime.fromtimestamp(int(profile.get("last_seen_at"))) if "last_seen_at" in profile else None,
+                    is_online=is_online,
+                ),
+                last_activity_at=datetime.fromtimestamp(float(chat_meta.get("last_activity_at", time.time()))),
+                last_message=ChatMessageSchema(
+                    id=UUID(hex=last_msg.get("id", "")),
+                    sender_id=UUID(hex=last_msg.get("sender_id", "")),
+                    chat_id=UUID(hex=last_msg.get("chat_id", "")),
+                    message=last_msg.get("message", ""),
+                    created_at=datetime.fromtimestamp(float(last_msg.get("created_at", time.time()))),
+                ),
+            )
+            chat_list.append(chat)
 
-        end = len(chat_ids)
-        return ChatResponseSchema(chats=chat, end=end)
+        return ChatResponseSchema(chats=chat_list, end=len(chat_ids) - 1)
 
     async def is_user_chat_owner(self, user_id: str, chat_id: str) -> bool:
         score: Optional[float] = await self.cache_redis.zscore(name=f"users:{user_id}:chats", value=chat_id)

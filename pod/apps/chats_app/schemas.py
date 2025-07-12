@@ -7,8 +7,6 @@ from pydantic import BaseModel
 
 class CreateMessageSchema(BaseModel):
     message: str
-    # image_urls: Optional[list[str]] = None
-    # video_urls: Optional[list[str]] = None
 
 
 class ParticipantSchema(BaseModel):
@@ -24,14 +22,23 @@ class ParticipantSchema(BaseModel):
         json_encoders = {UUID: lambda v: v.hex, datetime: lambda v: int(v.timestamp()) if v is not None else None}
 
 
+class ChatMessageSchema(BaseModel):
+    id: UUID
+    sender_id: UUID
+    chat_id: UUID
+    message: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+        json_encoders = {UUID: lambda v: v.hex, datetime: lambda v: int(v.timestamp())}
+
+
 class ChatSchema(BaseModel):
     id: UUID
     participant: ParticipantSchema
-    last_message: Optional[str]
+    last_message: Optional[ChatMessageSchema] = None
     last_activity_at: datetime
-
-    # last_message_seen: Optional[bool]
-    # unread_count: int
 
     class Config:
         from_attributes = True
@@ -41,23 +48,6 @@ class ChatSchema(BaseModel):
 class ChatResponseSchema(BaseModel):
     chats: list[ChatSchema]
     end: int
-
-
-class ChatMessageSchema(BaseModel):
-    id: UUID
-    sender_id: UUID
-    chat_id: UUID
-    message: str
-    # image_urls: Optional[list[str]] = None
-    # video_urls: Optional[list[str]] = None
-    created_at: datetime
-
-    # scheduled_at: Optional[datetime] = None
-    # read_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True
-        json_encoders = {UUID: lambda v: v.hex, datetime: lambda v: int(v.timestamp())}
 
 
 class ChatMessageResponseSchema(BaseModel):

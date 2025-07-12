@@ -38,7 +38,8 @@ async def notify_followers_task(user_id: str):
     my_logger.info(f"📣 Notified {len(online_followers)} followers of {user_id}")
 
 
-@broker.task(task_name="recalculate_feed_stats", schedule=[{"cron": "*/360 * * * *"}])
+# @broker.task(task_name="recalculate_feed_stats", schedule=[{"cron": "*/360 * * * *"}])
+@broker.task(task_name="notify_followers_task")
 async def recalculate_feed_stats(cache: Annotated[Redis, TaskiqDepends(lambda: my_cache_redis)]):
     my_logger.debug(f"recalculate_feed_stats starting...")
     # my_logger.debug(f"cache users count: {await cache.hget(name='users', key='count')}")

@@ -159,7 +159,7 @@ class WebSocketContextManager:
                     continue
 
                 pubsub_data = message.get("data")
-                my_logger.warning(f"data in message in _pubsub_listener: {message.get('data')}")
+                my_logger.warning(f"pubsub_data in (async for message in self.pubsub.listen()) in (_pubsub_listener): {pubsub_data}, type: {type(pubsub_data)}")
                 if pubsub_data is None:
                     continue
 

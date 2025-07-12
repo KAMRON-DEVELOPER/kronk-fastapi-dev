@@ -13,78 +13,13 @@ from settings.my_database import DBSession
 from settings.my_dependency import strictJwtDependency
 from settings.my_exceptions import ApiException
 from settings.my_redis import chat_cache_manager, cache_manager, pubsub_manager
-from utility.my_enums import ChatEvent
 from utility.my_logger import my_logger
 
 chats_router = APIRouter()
 
-'''
-class MessageBaseModel(BaseModel):
-    __abstract__ = True
-    sender_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey(column="user_table.id", ondelete="CASCADE"))
-    message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    image_urls: Mapped[Optional[list[str]]] = mapped_column(ARRAY(item_type=String), nullable=True)
-    video_urls: Mapped[Optional[list[str]]] = mapped_column(ARRAY(item_type=String), nullable=True)
-    scheduled_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
 
-class ChatParticipantModel(BaseModel):
-    __tablename__ = "chat_participant_table"
-    __table_args__ = (UniqueConstraint("user_id", "chat_id", name="uq_user_chat"),)
-    background_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey(column="user_table.id", ondelete="CASCADE"), primary_key=True)
-    chat_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey(column="chat_table.id", ondelete="CASCADE"), primary_key=True)
-    user: Mapped["UserModel"] = relationship(argument="UserModel", back_populates="chat_participants")
-    chat: Mapped["ChatModel"] = relationship(argument="ChatModel", back_populates="chat_participants")
-
-
-class ChatModel(BaseModel):
-    __tablename__ = "chat_table"
-    last_message_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
-    chat_participants: Mapped[list["ChatParticipantModel"]] = relationship(argument="ChatParticipantModel", back_populates="chat", cascade="all, delete-orphan")
-    chat_messages: Mapped[list["ChatMessageModel"]] = relationship(argument="ChatMessageModel", back_populates="chat", cascade="all, delete-orphan")
-    users: Mapped[list["UserModel"]] = relationship(secondary="chat_participant_table", back_populates="chats", viewonly=True)
-
-
-class ChatMessageModel(MessageBaseModel):
-    __tablename__ = "chat_message_table"
-    chat_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey(column="chat_table.id", ondelete="CASCADE"))
-    chat: Mapped["ChatModel"] = relationship(argument="ChatModel", back_populates="chat_messages", passive_deletes=True)
-    sender: Mapped["UserModel"] = relationship(argument="UserModel", back_populates="chat_messages", passive_deletes=True)
-
-'''
-
-'''
-
-class ParticipantSchema(BaseModel):
-    id: UUID
-    name: str
-    username: str
-    avatar_url: Optional[str] = None
-    last_seen_at: datetime
-    is_online: bool = False
-
-    class Config:
-        from_attributes = True
-        json_encoders = {UUID: lambda v: v.hex, datetime: lambda v: v.timestamp() if v is not None else None}
-
-
-class ChatTileSchema(BaseModel):
-    id: UUID
-    participant: ParticipantSchema
-    last_activity_at: datetime
-    last_message: Optional[str]
-    last_message_seen: Optional[bool]
-    unread_count: int
-
-    class Config:
-        from_attributes = True
-        json_encoders = {UUID: lambda v: v.hex, datetime: lambda v: int(v.timestamp())}
-
-'''
-
-
-@chats_router.post(path="/create", response_model=ChatSchema, status_code=200)
-async def create_chat_tile_route(jwt: strictJwtDependency, session: DBSession, schema: CreateMessageSchema, participant_id: UUID):
+@chats_router.post(path="/messages/create", response_model=ChatSchema, status_code=200)
+async def create_chat_route(jwt: strictJwtDependency, session: DBSession, schema: CreateMessageSchema, participant_id: UUID):
     try:
         if jwt.user_id == participant_id:
             raise ApiException(status_code=400, detail="Cannot create chat with self")
@@ -100,13 +35,14 @@ async def create_chat_tile_route(jwt: strictJwtDependency, session: DBSession, s
             raise ApiException(status_code=403, detail="Chat already exist.")
 
         chat_id = uuid4()
+        message_id = uuid4()
         now = datetime.now(UTC)
+        now_timestamp = int(now.timestamp())
 
         chat = ChatModel(id=chat_id, last_message_at=now)
         sender = ChatParticipantModel(chat_id=chat_id, user_id=jwt.user_id)
         receiver = ChatParticipantModel(chat_id=chat_id, user_id=participant_id)
-        message = ChatMessageModel(chat_id=chat_id, sender_id=jwt.user_id, message=schema.message)
-
+        message = ChatMessageModel(id=message_id, chat_id=chat_id, sender_id=jwt.user_id, message=schema.message)
         session.add_all([chat, sender, receiver, message])
         await session.commit()
 
@@ -114,7 +50,11 @@ async def create_chat_tile_route(jwt: strictJwtDependency, session: DBSession, s
         if not participant_profile:
             raise ApiException(400, "Participant profile not found")
 
-        mapping = {"id": chat_id.hex, "last_activity_at": int(now.timestamp()), "last_message": schema.message}
+        mapping = {
+            "id": chat_id.hex,
+            "last_activity_at": now_timestamp,
+            "last_message": {"id": message_id.hex, "chat_id": chat_id.hex, "sender_id": jwt.user_id.hex, "message": schema.message, "created_at": now_timestamp}
+        }
         await chat_cache_manager.create_chat(user_id=jwt.user_id.hex, participant_id=participant_id.hex, chat_id=chat_id.hex, mapping=mapping)
 
         is_online = await chat_cache_manager.is_online(participant_id=participant_id.hex)
@@ -130,25 +70,22 @@ async def create_chat_tile_route(jwt: strictJwtDependency, session: DBSession, s
                 is_online=is_online
             ),
             last_activity_at=now,
-            last_message=schema.message
+            last_message=ChatMessageSchema(id=message_id, chat_id=chat_id, sender_id=jwt.user_id, message=schema.message, created_at=now)
         )
 
         if is_online:
             participant_profile = await cache_manager.get_profile(jwt.user_id.hex)
 
             data = {
-                "type": ChatEvent.created_chat.value,
-                "id": chat_id.hex,
+                **mapping,
                 "participant": {
                     "id": jwt.user_id.hex,
                     "name": participant_profile.get("name"),
                     "username": participant_profile.get("username"),
                     "avatar_url": participant_profile.get("avatar_url"),
-                    "last_seen_at": now.timestamp(),
+                    "last_seen_at": now_timestamp,
                     "is_online": True,
-                },
-                "last_activity_at": int(now.timestamp()),
-                "last_message": schema.message
+                }
             }
             await pubsub_manager.publish(topic=f"chats:home:{participant_id.hex}", data=data)
 
@@ -158,8 +95,8 @@ async def create_chat_tile_route(jwt: strictJwtDependency, session: DBSession, s
         raise ApiException(status_code=500, detail=f"Something went wrong while creating chat: {e}")
 
 
-@chats_router.post(path="/delete", response_model=ResultSchema, status_code=200)
-async def delete_chat_tile_route(jwt: strictJwtDependency, session: DBSession, chat_id: UUID):
+@chats_router.delete(path="/delete", response_model=ResultSchema, status_code=200)
+async def delete_chat_route(jwt: strictJwtDependency, session: DBSession, chat_id: UUID):
     try:
         is_user_chat_owner: bool = await chat_cache_manager.is_user_chat_owner(user_id=jwt.user_id.hex, chat_id=chat_id.hex)
         if not is_user_chat_owner:
@@ -193,7 +130,7 @@ async def get_chats_route(jwt: strictJwtDependency, start: int = 0, end: int = 2
 
 
 @chats_router.get(path="/messages", response_model=ChatMessageResponseSchema, status_code=200)
-async def get_chats_route(jwt: strictJwtDependency, session: DBSession, chat_id: UUID, start: int = 0, end: int = 20):
+async def get_chat_messages_route(_: strictJwtDependency, session: DBSession, chat_id: UUID, start: int = 0, end: int = 20):
     try:
         my_logger.warning("1")
         count_stmt = select(func.count()).where(ChatMessageModel.chat_id == chat_id)
@@ -214,6 +151,29 @@ async def get_chats_route(jwt: strictJwtDependency, session: DBSession, chat_id:
         response = ChatMessageResponseSchema(messages=[ChatMessageSchema.model_validate(obj=message) for message in messages], end=total_messages - 1)
         my_logger.warning("5")
         return response
+    except Exception as e:
+        my_logger.exception(f"Exception e: {e}")
+        raise ApiException(status_code=400, detail=f"Something went wrong while getting chat tiles, e: {e}")
+
+
+@chats_router.delete(path="/messages/delete", response_model=ResultSchema, status_code=200)
+async def delete_chat_message_route(jwt: strictJwtDependency, session: DBSession, _message_id: UUID, chat_id: UUID):
+    try:
+        is_user_chat_owner: bool = await chat_cache_manager.is_user_chat_owner(user_id=jwt.user_id.hex, chat_id=chat_id.hex)
+        if not is_user_chat_owner:
+            raise ApiException(status_code=403, detail="Chat does not belong to you")
+
+        stmt = select(ChatModel).options(selectinload(ChatModel.chat_participants)).where(ChatModel.id == chat_id)
+        result = await session.execute(stmt)
+        chat: Optional[ChatModel] = result.scalar_one_or_none()
+        if not chat:
+            return {"ok": False}
+
+        await chat_cache_manager.delete_chat(participants=[pid.user_id.hex for pid in chat.chat_participants], chat_id=chat_id.hex)
+        await session.delete(instance=chat)
+        await session.commit()
+
+        return {"ok": True}
     except Exception as e:
         my_logger.exception(f"Exception e: {e}")
         raise ApiException(status_code=400, detail=f"Something went wrong while getting chat tiles, e: {e}")
