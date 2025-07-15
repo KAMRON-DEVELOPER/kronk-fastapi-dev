@@ -3,8 +3,12 @@ global:
   evaluation_interval: 30s
 
 scrape_configs:
+  - job_name: "prometheus_job"
+    static_configs:
+      - targets: ["localhost:9090"]
+        
   # Create a job for Docker Swarm containers.
-  - job_name: 'dockerswarm'
+  - job_name: 'dockerswarm_job'
     dockerswarm_sd_configs:
       - host: "tcp://178.212.35.106:2375" # unix:///var/run/docker.sock
         role: tasks

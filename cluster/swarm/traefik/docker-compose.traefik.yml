@@ -1,0 +1,96 @@
+services:
+  traefik:
+    image: "traefik:v3.4"
+    command:
+      - "--api=true"
+      - "--api.insecure=false"
+      - "--api.dashboard=true"
+      - "--providers.swarm=true"
+      - "--providers.swarm.endpoint=unix:///var/run/docker.sock" # Default
+      - "--providers.swarm.network=traefik-network" # This option can be overridden on a per-container basis with the 'traefik.docker.network'
+      # - "--traefik.swarm.lbswarm=true" # If you enable this option, Traefik will use the virtual IP provided by docker swarm instead of the containers IPs
+      # - "--providers.swarm.constraints=Label(`a.label.name`,`foo`)" $ If none of the container labels match the expression, no route for that container is created.
+      # - "--providers.swarm.tls=false/true"
+      - "--providers.swarm.exposedbydefault=false"
+      - "--entrypoints.http.address=:80"
+      - "--entrypoints.https.address=:443"
+      # - "--certificatesresolvers.leresolver.acme.tlschallenge=true"
+      - "--certificatesresolvers.leresolver.acme.httpchallenge=true"
+      - "--certificatesresolvers.leresolver.acme.httpchallenge.entrypoint=http"
+      - "--certificatesresolvers.leresolver.acme.email=atajanovkamronbek2003@gmail.com"
+      - "--certificatesresolvers.leresolver.acme.storage=/letsencrypt/acme.json"
+      - "--log.level=WARN"
+      - "--accesslog.filepath=/log/access/access.log"
+    ports:
+      - "80:80"
+      - "443:443"
+    # ports:
+    # - target: 80
+    #   published: 80
+    #   protocol: tcp
+    #   mode: host
+    # - target: 443
+    #   published: 443
+    #   protocol: tcp
+    #   mode: host
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./config/acme.json:/letsencrypt/acme.json"
+      - "./config/access.log:/log/access/access.log"
+    networks:
+      - traefik-network
+    secrets:
+      - traefik_user_credentials
+    # environment:
+    #   TRAEFIK_USER_CREDENTIALS: traefik_user_credentials
+    # TRAEFIK_USER_CREDENTIALS: /run/secrets/traefik_user_credentials
+    deploy:
+      labels:
+        - "traefik.enable=true"
+
+        # Mandatory by swarm
+        - "traefik.http.services.traefik_service.loadbalancer.server.port=8080"
+
+        # HTTP Router for Dashboard (Redirects to HTTPS)
+        - "traefik.http.routers.dashboard_http.rule=Host(`traefik.kronk.uz`)"
+        - "traefik.http.routers.dashboard_http.entrypoints=http"
+        - "traefik.http.routers.dashboard_http.middlewares=traefik_middleware"
+
+        # HTTPS Router for Dashboard
+        - "traefik.http.routers.dashboard_https.rule=Host(`traefik.kronk.uz`)"
+        - "traefik.http.routers.dashboard_https.service=dashboard@internal"
+        - "traefik.http.routers.dashboard_https.entrypoints=https"
+        - "traefik.http.routers.dashboard_https.tls=true"
+        - "traefik.http.routers.dashboard_https.tls.certresolver=leresolver"
+        - "traefik.http.routers.dashboard_https.middlewares=auth_middleware"
+
+        # API Router (HTTPS only)
+        - "traefik.http.routers.api.rule=Host(`traefik.kronk.uz`) && PathPrefix(`/api`)"
+        - "traefik.http.routers.api.service=api@internal"
+        - "traefik.http.routers.api.entrypoints=https"
+        - "traefik.http.routers.api.tls=true"
+        - "traefik.http.routers.api.tls.certresolver=leresolver"
+        - "traefik.http.routers.api.middlewares=auth_middleware"
+
+        # Middlewares
+        - "traefik.http.middlewares.traefik_middleware.redirectscheme.scheme=https"
+        - "traefik.http.middlewares.traefik_middleware.redirectscheme.permanent=true"
+        # - "traefik.http.middlewares.auth_middleware.basicauth.users=kamronbek:$2y$$05$$sRDJSkw6MXXeuSfXeyNbD.azZy0SDEYB2rT6w3R.hwgxebRrFW.Ji"
+        - "traefik.http.middlewares.auth_middleware.basicauth.usersfile=/run/secrets/traefik_user_credentials"
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints: [node.role == manager]
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 2G
+
+networks:
+  traefik-network:
+    external: true
+    driver: overlay
+
+secrets:
+  traefik_user_credentials:
+    external: true

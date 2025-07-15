@@ -78,6 +78,7 @@ async def handle_outgoing_event(chat_event: ChatEvent, user_id: str, data: dict)
             chat_id = data.get("chat_id")
             # TODO Save to DB here
             participant_ids: set[str] = await chat_cache_manager.get_chat_participants(chat_id=chat_id)
+            participant_ids.discard(user_id)
             for pid in participant_ids:
                 await pubsub_manager.publish(f"chats:home:{pid}", data)
 
