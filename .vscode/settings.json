@@ -1,0 +1,28 @@
+{
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true,
+    "**/.venv": true,
+    "**/volumes": true,
+    "**/node_modules": true,
+    "**/alembic/versions/__pycache__": true,
+    "**/alembic/versions/*.pyc": true,
+    "**/redis_storage": true,
+    "**/postgres_storage": true
+  },
+  "search.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true,
+    "**/.venv": true,
+    "**/volumes": true,
+    "**/node_modules": true
+  },
+  "python.analysis.exclude": [
+    "**/__pycache__",
+    "**/*.pyc",
+    "**/.venv",
+    "**/volumes",
+    "**/redis_storage",
+    "**/postgres_storage"
+  ]
+}
