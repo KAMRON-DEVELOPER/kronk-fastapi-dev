@@ -11,74 +11,38 @@ class Settings(BaseSettings):
 
     DEBUG: int = 1
 
-    DATABASE_URL: str = ""
+    # DATABASE
+    DATABASE_URL: str = "/run/secrets/DATABASE_URL"
 
-    REDIS_URL: str = ""
-    TASKIQ_WORKER_URL: str = ""
-    TASKIQ_REDIS_SCHEDULE_SOURCE_URL: str = ""
-    TASKIQ_RESULT_BACKEND_URL: str = ""
+    # REDIS & TASKIQ
+    REDIS_URL: str = "/run/secrets/REDIS_URL"
+    TASKIQ_WORKER_URL: str = "/run/secrets/TASKIQ_WORKER_URL"
+    TASKIQ_REDIS_SCHEDULE_SOURCE_URL: str = "/run/secrets/TASKIQ_REDIS_SCHEDULE_SOURCE_URL"
+    TASKIQ_RESULT_BACKEND_URL: str = "/run/secrets/TASKIQ_RESULT_BACKEND_URL"
+
+    # FIREBASE ADMIN SDK
+    FIREBASE_ADMINSDK: str = "/run/secrets/FIREBASE_ADMINSDK"
+
+    # S3
+    S3_ACCESS_KEY_ID: str = "/run/secrets/S3_ACCESS_KEY_ID"
+    S3_SECRET_ACCESS_KEY: str = "/run/secrets/S3_SECRET_ACCESS_KEY"
 
     # MINIO
-    MINIO_ROOT_USER: str = ""
-    MINIO_ROOT_PASSWORD: str = ""
-    MINIO_ENDPOINT: str = ""
-    MINIO_BUCKET_NAME: str = ""
+    MINIO_ROOT_USER: str = "/run/secrets/MINIO_ROOT_USER"
+    MINIO_ROOT_PASSWORD: str = "/run/secrets/MINIO_ROOT_PASSWORD"
+    MINIO_ENDPOINT: str = "/run/secrets/MINIO_ENDPOINT"
+    MINIO_BUCKET_NAME: str = "/run/secrets/MINIO_BUCKET_NAME"
 
     # FASTAPI JWT
-    SECRET_KEY: str = ""
-    ALGORITHM: str = ""
-    ACCESS_TOKEN_EXPIRE_TIME: int = 0
-    REFRESH_TOKEN_EXPIRE_TIME: int = 0
+    SECRET_KEY: str = "/run/secrets/SECRET_KEY"
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_TIME: int = 60
+    REFRESH_TOKEN_EXPIRE_TIME: int = 7
 
     # EMAIL
-    EMAIL_SERVICE_API_KEY: str = ""
+    EMAIL_SERVICE_API_KEY: str = "/run/secrets/EMAIL_SERVICE_API_KEY"
 
-    # FIREBASE
-    FIREBASE_TYPE: str = ""
-    FIREBASE_PROJECT_ID: str = ""
-    FIREBASE_PRIVATE_KEY_ID: str = ""
-    FIREBASE_PRIVATE_KEY: str = ""
-    FIREBASE_CLIENT_EMAIL: str = ""
-    FIREBASE_CLIENT_ID: str = ""
-    FIREBASE_AUTH_URI: str = ""
-    FIREBASE_TOKEN_URI: str = ""
-    FIREBASE_AUTH_PROVIDER_X509_CERT_URI: str = ""
-    FIREBASE_CLIENT_CERT_URL: str = ""
-
-    @property
-    def database_url(self) -> str:
-        host = "localhost" if self.DEBUG else "postgres.kronk.uz"
-        port = 5432
-        dbname = "kronkdb"
-        user = "postgres"
-        password = "yourpassword"
-
-        if self.DEBUG:
-            return f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{dbname}"
-        return (
-            f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{dbname}"
-            f"?sslmode=verify-full"
-            f"&sslrootcert=/run/secrets/fastapi_ca.pem"
-            f"&sslcert=/run/secrets/fastapi_client_cert.pem"
-            f"&sslkey=/run/secrets/fastapi_client_key.pem"
-        )
-
-    @property
-    def firebase_adminsdk(self) -> dict:
-        return {
-            "type": self.FIREBASE_TYPE,
-            "project_id": self.FIREBASE_PROJECT_ID,
-            "private_key_id": self.FIREBASE_PRIVATE_KEY_ID,
-            "private_key": self.FIREBASE_PRIVATE_KEY,  # replace("\\n", "\n")
-            "client_email": self.FIREBASE_CLIENT_EMAIL,
-            "client_id": self.FIREBASE_CLIENT_ID,
-            "auth_uri": self.FIREBASE_AUTH_URI,
-            "token_uri": self.FIREBASE_TOKEN_URI,
-            "auth_provider_x509_cert_url": self.FIREBASE_AUTH_PROVIDER_X509_CERT_URI,
-            "client_x509_cert_url": self.FIREBASE_CLIENT_CERT_URL,
-        } if not self.DEBUG else "/run/secrets/FIREBASE_ADMINSDK"
-
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore", secrets_dir="/run/secrets" if not bool(DEBUG) else None)
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore", secrets_dir="/run/secrets")
 
 
 @lru_cache
