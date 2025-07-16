@@ -41,12 +41,12 @@ docker secret create docker_client_key.pem docker-client-key.pem
 
 ```json
 {
+  "hosts": ["unix:///var/run/docker.sock", "tcp://0.0.0.0:2376"],
   "tls": true,
   "tlsverify": true,
   "tlscacert": "/etc/docker/certs/ca.pem",
   "tlscert": "/etc/docker/certs/docker-server-cert.pem",
   "tlskey": "/etc/docker/certs/docker-server-key.pem",
-  "hosts": ["unix:///var/run/docker.sock", "tcp://0.0.0.0:2376"]
 }
 ```
 
@@ -84,7 +84,7 @@ openssl x509 -req -in redis-server-prod.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key
 
 # Redis Dev Server Certificate
 openssl req -new -key redis-server-key.pem -out redis-server-dev.csr -subj "/CN=127.0.0.1"
-echo "subjectAltName = IP:127.0.0.1" > redis-ext-dev.cnf
+echo "subjectAltName = DNS:localhost,IP:127.0.0.1" > redis-ext-dev.cnf
 echo "extendedKeyUsage = serverAuth" >> redis-ext-dev.cnf
 openssl x509 -req -in redis-server-dev.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.pem -CAcreateserial -out redis-server-dev-cert.pem -days 3650 -sha256 -extfile redis-ext-dev.cnf
 
@@ -98,7 +98,7 @@ openssl x509 -req -in pg-server-prod.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.pe
 
 # PostgreSQL Dev Server Certificate
 openssl req -new -key pg-server-dev-key.pem -out pg-server-dev.csr -subj "/CN=127.0.0.1"
-echo "subjectAltName = IP:127.0.0.1" > pg-ext.cnf
+echo "subjectAltName = DNS:localhost,IP:127.0.0.1" > pg-ext.cnf
 echo "extendedKeyUsage = serverAuth" >> pg-ext.cnf
 openssl x509 -req -in pg-server-dev.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.pem -CAcreateserial -out pg-server-dev-cert.pem -days 3650 -sha256 -extfile pg-ext.cnf
 
