@@ -21,7 +21,7 @@ mkdir -p ~/certs/docker && cd ~/certs/docker
 
 openssl genrsa -out docker-server-key.pem 4096
 openssl req -new -key docker-server-key.pem -out docker-server.csr -subj "/CN=127.0.0.1"
-echo "subjectAltName = IP:127.0.0.1" > docker-ext.cnf
+echo "subjectAltName = DNS:localhost,IP:127.0.0.1" > docker-ext.cnf
 echo "extendedKeyUsage = serverAuth" >> docker-ext.cnf
 openssl x509 -req -in docker-server.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.pem -CAcreateserial -out docker-server-cert.pem -days 3650 -sha256 -extfile docker-ext.cnf
 
