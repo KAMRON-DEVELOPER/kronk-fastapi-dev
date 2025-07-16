@@ -116,9 +116,19 @@ openssl req -new -key fastapi-client-key.pem -out fastapi-client.csr -subj "/CN=
 echo "extendedKeyUsage = clientAuth" > client-ext.cnf
 openssl x509 -req -in fastapi-client.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.pem -CAcreateserial -out fastapi-client-cert.pem -days 3650 -sha256 -extfile client-ext.cnf
 
+
 docker secret create fastapi_ca.pem ../ca/ca.pem
-docker secret create fastapi_client_cert.pem fastapi-client-cert.pem
+
+docker secret create pg_server_key.pem pg-server-key.pem
+docker secret create redis_server_prod_cert.pem redis-server-prod-cert.pem
+docker secret create redis_server_dev_cert.pem redis-server-dev-cert.pem
+
+docker secret create pg_server_key.pem pg-server-key.pem
+docker secret create pg_server_prod_cert.pem pg-server-prod-cert.pem
+docker secret create pg_server_dev_cert.pem pg-server-dev-cert.pem
+
 docker secret create fastapi_client_key.pem fastapi-client-key.pem
+docker secret create fastapi_client_cert.pem fastapi-client-cert.pem
 ```
 
 ### Example URLs
