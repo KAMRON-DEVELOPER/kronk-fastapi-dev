@@ -119,7 +119,7 @@ openssl x509 -req -in fastapi-client.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.pe
 
 docker secret create fastapi_ca.pem ../ca/ca.pem
 
-docker secret create pg_server_key.pem pg-server-key.pem
+docker secret create redis_server_key.pem redis-server-key.pem
 docker secret create redis_server_prod_cert.pem redis-server-prod-cert.pem
 docker secret create redis_server_dev_cert.pem redis-server-dev-cert.pem
 
