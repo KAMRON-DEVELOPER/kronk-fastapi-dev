@@ -105,7 +105,7 @@ openssl x509 -req -in pg-server-dev.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.pem
 # FastAPI Client Certificate (shared for both Redis and PostgreSQL)
 mkdir -p ~/certs/fastapi && cd ~/certs/fastapi
 openssl genrsa -out fastapi-client-key.pem 4096
-openssl req -new -key fastapi-client-key.pem -out fastapi-client.csr -subj "/CN=fastapi-client"
+openssl req -new -key fastapi-client-key.pem -out fastapi-client.csr -subj "/CN=fastapi"
 echo "extendedKeyUsage = clientAuth" > client-ext.cnf
 openssl x509 -req -in fastapi-client.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.pem -CAcreateserial -out fastapi-client-crt.pem -days 3650 -sha256 -extfile client-ext.cnf
 
