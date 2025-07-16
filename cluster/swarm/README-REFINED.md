@@ -99,15 +99,15 @@ openssl x509 -req -in redis-server-dev.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.
 mkdir -p ~/certs/postgres && cd ~/certs/postgres
 openssl genrsa -out pg-server-key.pem 4096
 openssl req -new -key pg-server-key.pem -out pg-server-prod.csr -subj "/CN=postgres.kronk.uz"
-echo "subjectAltName = DNS:postgres.kronk.uz" > pg-ext.cnf
-echo "extendedKeyUsage = serverAuth" >> pg-ext.cnf
-openssl x509 -req -in pg-server-prod.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.pem -CAcreateserial -out pg-server-prod-cert.pem -days 3650 -sha256 -extfile pg-ext.cnf
+echo "subjectAltName = DNS:postgres.kronk.uz" > pg-ext-prod.cnf
+echo "extendedKeyUsage = serverAuth" >> pg-ext-prod.cnf
+openssl x509 -req -in pg-server-prod.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.pem -CAcreateserial -out pg-server-prod-cert.pem -days 3650 -sha256 -extfile pg-ext-prod.cnf
 
 # PostgreSQL Dev
 openssl req -new -key pg-server-key.pem -out pg-server-dev.csr -subj "/CN=127.0.0.1"
-echo "subjectAltName = DNS:localhost,IP:127.0.0.1" > pg-ext.cnf
-echo "extendedKeyUsage = serverAuth" >> pg-ext.cnf
-openssl x509 -req -in pg-server-dev.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.pem -CAcreateserial -out pg-server-dev-cert.pem -days 3650 -sha256 -extfile pg-ext.cnf
+echo "subjectAltName = DNS:localhost,IP:127.0.0.1" > pg-ext-dev.cnf
+echo "extendedKeyUsage = serverAuth" >> pg-ext-dev.cnf
+openssl x509 -req -in pg-server-dev.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.pem -CAcreateserial -out pg-server-dev-cert.pem -days 3650 -sha256 -extfile pg-ext-dev.cnf
 
 # FastAPI Client (shared for Redis and PostgreSQL)
 mkdir -p ~/certs/fastapi && cd ~/certs/fastapi
