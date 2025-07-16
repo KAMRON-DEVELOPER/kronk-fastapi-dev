@@ -13,7 +13,7 @@ settings = get_settings()
 
 def initialize_firebase():
     try:
-        cred = credentials.Certificate(cert="/run/secrets/FIREBASE_ADMINSDK_PROD" if not settings.DEBUG else settings.firebase_adminsdk_dev)
+        cred = credentials.Certificate(cert=settings.firebase_adminsdk)
         default_app = initialize_app(credential=cred)
         my_logger.debug(f"firebase default_app.project_id: {default_app.project_id}, default_app.name: {default_app.name}")
     except Exception as e:

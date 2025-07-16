@@ -1,7 +1,6 @@
 services:
   prometheus:
     image: prom/prometheus:latest
-    # user: root #
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.retention.size=5GB"
@@ -10,14 +9,16 @@ services:
       - mode: host
         target: 9090
         published: 9090
-    volumes:
-      # - /var/run/docker.sock:/var/run/docker.sock:ro
-      - prometheus_storage:/prometheus
-      - ./config.yml:/etc/prometheus/prometheus.yml
-
     networks:
       - traefik-network
       - monitoring-network
+    secrets:
+      - ca-cert
+      - prometheus-cert
+      - prometheus-key
+    volumes:
+      - prometheus_storage:/prometheus
+      - ./config.yml:/etc/prometheus/prometheus.yml
     deploy:
       labels:
         - "traefik.enable=true"
@@ -42,7 +43,10 @@ services:
       mode: replicated
       replicas: 1
       placement:
-        constraints: [node.role == manager]
+        constraints:
+          [
+            node.role == manager,
+          ]
       resources:
         limits:
           cpus: "1.0"
@@ -59,3 +63,11 @@ networks:
 volumes:
   prometheus_storage:
     driver: local
+
+secrets:
+  ca-cert:
+    external: true
+  prometheus-cert:
+    external: true
+  prometheus-key:
+    external: true

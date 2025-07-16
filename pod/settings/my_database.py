@@ -12,7 +12,7 @@ from utility.my_logger import my_logger
 
 settings = get_settings()
 
-async_engine: AsyncEngine = create_async_engine(settings.DATABASE_URL, echo=False)
+async_engine: AsyncEngine = create_async_engine(settings.DATABASE_URL, echo=False, connect_args={"ssl": True})
 async_session = async_sessionmaker(async_engine, expire_on_commit=False, class_=AsyncSession)
 
 

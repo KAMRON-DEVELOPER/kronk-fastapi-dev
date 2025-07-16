@@ -1,6 +1,6 @@
 services:
   fastapi:
-    image: kamronbekdev/fastapi:v2.0
+    image: kamronbekdev/kronk-fastapi-alpha:2.1
     ports:
       - mode: ingress
         target: 8000
@@ -8,11 +8,26 @@ services:
     networks:
       - traefik-network
     secrets:
-      - DB_URL
+      - DATABASE_URL
+
       - REDIS_URL
-    # environment:
-    #   DB_URL: /run/secrets/db_url
-    #   REDIS_URL: /run/secrets/redis_url
+      - TASKIQ_WORKER_URL
+      - TASKIQ_RESULT_BACKEND_URL
+      - TASKIQ_REDIS_SCHEDULE_SOURCE_URL
+
+      - SECRET_KEY
+      - REFRESH_TOKEN_EXPIRE_TIME
+      - ACCESS_TOKEN_EXPIRE_TIME
+      - ALGORITHM
+
+      - MINIO_BUCKET_NAME
+      - MINIO_ENDPOINT
+      - MINIO_ROOT_PASSWORD
+      - MINIO_ROOT_USER
+
+      - EMAIL_SERVICE_API_KEY
+
+      - FIREBASE_ADMINSDK
     deploy:
       replicas: 1
       placement:
@@ -59,7 +74,38 @@ networks:
     driver: overlay
 
 secrets:
-  DB_URL:
+  DATABASE_URL:
     external: true
+
   REDIS_URL:
+    external: true
+  TASKIQ_WORKER_URL:
+    external: true
+  TASKIQ_RESULT_BACKEND_URL:
+    external: true
+  TASKIQ_REDIS_SCHEDULE_SOURCE_URL:
+    external: true
+
+  SECRET_KEY:
+    external: true
+  REFRESH_TOKEN_EXPIRE_TIME:
+    external: true
+  ACCESS_TOKEN_EXPIRE_TIME:
+    external: true
+  ALGORITHM:
+    external: true
+
+  MINIO_BUCKET_NAME:
+    external: true
+  MINIO_ENDPOINT:
+    external: true
+  MINIO_ROOT_PASSWORD:
+    external: true
+  MINIO_ROOT_USER:
+    external: true
+
+  EMAIL_SERVICE_API_KEY:
+    external: true
+
+  FIREBASE_ADMINSDK_PROD:
     external: true

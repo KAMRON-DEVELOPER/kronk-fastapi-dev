@@ -2,85 +2,52 @@
 
 ## Protect the Docker daemon socket
 
-### 1. Generate CA (you’ll need to enter a passphrase)
+### 🔒 1. Certificate Authority (CA)
 
 ```bash
+mkdir -p ~/certs/ca && cd ~/certs/ca
 openssl genrsa -aes256 -out ca-key.pem 4096
-openssl req -new -x509 -days 365 -key ca-key.pem -sha256 -out ca.pem -subj "/CN=docker-ca.kronk.uz"
+openssl req -new -x509 -days 3650 -key ca-key.pem -sha256 -out ca.pem -subj "/CN=Kronk Root CA"
 ```
 
-### 2. Generate Server key and CSR
+**Note:** The `ca.pem` file is the Certificate Authority certificate used to verify signed certificates.
+
+**Warning:** The `ca-key.pem` file is the CA private key. **Store it securely** and **never store it as a Docker secret** in production to prevent unauthorized access.
+
+### 🚀 2. Docker Daemon TLS (for Prometheus)
 
 ```bash
-openssl genrsa -out server-key.pem 4096
-openssl req -new -sha256 -key server-key.pem -out server.csr \
-  -subj "/CN=docker-api.kronk.uz"
+mkdir -p ~/certs/docker && cd ~/certs/docker
+
+openssl genrsa -out docker-server-key.pem 4096
+openssl req -new -key docker-server-key.pem -out docker-server.csr -subj "/CN=127.0.0.1"
+echo "subjectAltName = IP:127.0.0.1" > docker-ext.cnf
+echo "extendedKeyUsage = serverAuth" >> docker-ext.cnf
+openssl x509 -req -in docker-server.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.pem -CAcreateserial -out docker-server-crt.pem -days 3650 -sha256 -extfile docker-ext.cnf
+
+openssl genrsa -out docker-client-key.pem 4096
+openssl req -new -key docker-client-key.pem -out docker-client.csr -subj "/CN=prometheus"
+echo "extendedKeyUsage = clientAuth" > docker-client-ext.cnf
+openssl x509 -req -in docker-client.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.pem -CAcreateserial -out docker-client-cert.pem -days 3650 -sha256 -extfile docker-client-ext.cnf
+
+docker secret create docker_ca.pem ../ca/ca.pem
+docker secret create docker_server_cert.pem docker-server-crt.pem
+docker secret create docker_server_key.pem docker-server-key.pem
+docker secret create docker_client_cert.pem docker-client-cert.pem
+docker secret create docker_client_key.pem docker-client-key.pem
 ```
 
-### 3. Create extfile for IP/DNS SANs
-
-```bash
-cat > extfile.cnf <<EOF
-subjectAltName = DNS:docker-api.kronk.uz,IP:64.226.85.243,IP:127.0.0.1
-extendedKeyUsage = serverAuth
-EOF
-```
-
-### 4. Sign server cert
-
-```bash
-openssl x509 -req -days 365 -sha256 -in server.csr -CA ca.pem -CAkey ca-key.pem \
-  -CAcreateserial -out server-cert.pem -extfile extfile.cnf
-```
-
-### 5. Generate Client key and CSR
-
-```bash
-openssl genrsa -out client-key.pem 4096
-openssl req -new -sha256 -key client-key.pem -out client.csr \
-  -subj "/CN=prometheus"
-```
-
-### 6. Create extfile for client
-
-```bash
-echo extendedKeyUsage = clientAuth > extfile-client.cnf
-```
-
-### 7. Sign client cert
-
-```bash
-openssl x509 -req -days 365 -sha256 -in client.csr -CA ca.pem -CAkey ca-key.pem \
-  -CAcreateserial -out client-cert.pem -extfile extfile-client.cnf
-```
-
-### 8. Clean up temporary files
-
-```bash
-rm -v server.csr client.csr extfile.cnf extfile-client.cnf
-```
-
-### 9. Secure permissions
-
-```bash
-chmod 0400 ca-key.pem server-key.pem client-key.pem
-chmod 0444 ca.pem server-cert.pem client-cert.pem
-```
-
-## 🔧 How to Start Docker Daemon with TLS
-
-### In ```/etc/docker/daemon.json```
+#### Update `/etc/docker/daemon.json`
 
 ```json
 {
-  "hosts": ["unix:///var/run/docker.sock", "tcp://0.0.0.0:2376"],
   "tls": true,
   "tlsverify": true,
   "tlscacert": "/etc/docker/certs/ca.pem",
-  "tlscert": "/etc/docker/certs/server-cert.pem",
-  "tlskey": "/etc/docker/certs/server-key.pem"
+  "tlscert": "/etc/docker/certs/docker-server-crt.pem",
+  "tlskey": "/etc/docker/certs/docker-server-key.pem",
+  "hosts": ["unix:///var/run/docker.sock", "tcp://0.0.0.0:2376"]
 }
-
 ```
 
 ### Then restart Docker
@@ -89,7 +56,7 @@ chmod 0444 ca.pem server-cert.pem client-cert.pem
 sudo systemctl restart docker
 ```
 
-## 📈 How Prometheus Should Connect
+### 📈 How Prometheus Should Connect
 
 ```yaml
 scrape_configs:
@@ -104,21 +71,39 @@ scrape_configs:
     scheme: https
 ```
 
-## 🗂️ General Layout
+### 🔒 3. Redis and PostgreSQL TLS (shared client certs for FastAPI)
 
-### [ Manager Node ]
+```bash
+# Redis Server Certificate
+mkdir -p ~/certs/redis && cd ~/certs/redis
+openssl genrsa -out redis-server.key.pem 4096
+openssl req -new -key redis-server.key.pem -out redis-server.csr -subj "/CN=redis.internal"
+echo "subjectAltName = DNS:redis.internal" > redis-ext.cnf
+echo "extendedKeyUsage = serverAuth" >> redis-ext.cnf
+openssl x509 -req -in redis-server.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.pem -CAcreateserial -out redis-server.crt.pem -days 3650 -sha256 -extfile redis-ext.cnf
 
-- Traefik (Ingress Controller)
-- Grafana (Dashboard)
-- Prometheus (Metrics DB)
-- Loki (Logs DB)
+# PostgreSQL Server Certificate
+mkdir -p ~/certs/postgres && cd ~/certs/postgres
+openssl genrsa -out pg-server.key.pem 4096
+openssl req -new -key pg-server.key.pem -out pg-server.csr -subj "/CN=postgres.internal"
+echo "subjectAltName = DNS:postgres.internal" > pg-ext.cnf
+echo "extendedKeyUsage = serverAuth" >> pg-ext.cnf
+openssl x509 -req -in pg-server.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.pem -CAcreateserial -out pg-server.crt.pem -days 3650 -sha256 -extfile pg-ext.cnf
 
-### [ Worker Nodes ]
+# FastAPI Client Certificate (shared for both Redis and PostgreSQL)
+mkdir -p ~/certs/fastapi && cd ~/certs/fastapi
+openssl genrsa -out fastapi-client-key.pem 4096
+openssl req -new -key fastapi-client-key.pem -out fastapi-client.csr -subj "/CN=fastapi-client"
+echo "extendedKeyUsage = clientAuth" > client-ext.cnf
+openssl x509 -req -in fastapi-client.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.pem -CAcreateserial -out fastapi-client-crt.pem -days 3650 -sha256 -extfile client-ext.cnf
 
-- FastAPI App Containers
-- node-exporter (System metrics)
-- cAdvisor (Container metrics)
-- promtail (Log shipping)
+docker secret create fastapi_ca.pem ../ca/ca.pem
+docker secret create fastapi_client_cert.pem fastapi-client-crt.pem
+docker secret create fastapi_client_key.pem fastapi-client-key.pem
+
+rediss://:password@redis.internal:6379/0?ssl_cert_reqs=required&ssl_ca_certs=/run/secrets/fastapi_ca.pem&ssl_certfile=/run/secrets/fastapi_client_cert.pem&ssl_keyfile=/run/secrets/fastapi_client_key.pem
+postgresql://user:password@postgres.internal:5432/dbname?sslmode=verify-full&sslrootcert=/run/secrets/fastapi_ca.pem&sslcert=/run/secrets/fastapi_client_cert.pem&sslkey=/run/secrets/fastapi_client_key.pem
+```
 
 ---
 
@@ -155,21 +140,46 @@ This guide contains all the commands needed to create Docker secrets for your ba
 ```bash
 echo './' | docker secret create pythonpath_env -
 
+# KEYS & CERTS
+docker secret create ca-cert ./ca.crt
+docker secret create client-cert ./client-cert.pem
+docker secret create client-key ./client-key.pem
+docker secret create redis-cert ./redis-cert.pem
+docker secret create redis-key ./redis-key.pem
+docker secret create postgres-cert ./postgres-cert.pem
+docker secret create postgres-key ./postgres-key.pem
+
 # POSTGRES
-echo 'postgresql+asyncpg://kamronbek:kamronbek2003@94.136.191.25:5432/dev_db' | docker secret create database_url -
+echo 'postgresql+psycopg2://user:password@postgres:5432/dbname?sslmode=verify-full&sslrootcert=/run/secrets/ca-cert&sslcert=/run/secrets/client-cert&sslkey=/run/secrets/client-key' | docker secret create database-url -
+
+DATABASE_URL
+REDIS_URL
+TASKIQ_WORKER_URL
+TASKIQ_RESULT_BACKEND_URL
+TASKIQ_REDIS_SCHEDULE_SOURCE_URL
+SECRET_KEY
+REFRESH_TOKEN_EXPIRE_TIME
+ACCESS_TOKEN_EXPIRE_TIME
+ALGORITHM
+MINIO_BUCKET_NAME
+MINIO_ENDPOINT
+MINIO_ROOT_PASSWORD
+MINIO_ROOT_USER
+EMAIL_SERVICE_API_KEY
+FIREBASE_ADMINSDK
 
 # REDIS
-echo 'redis://default:kamronbek2003@94.136.191.25:6379' | docker secret create redis_url -
-echo 'redis://default:kamronbek2003@94.136.191.25:6379/0?decode_responses=True&protocol=3' | docker secret create redis_url_old -
-echo 'redis://default:kamronbek2003@94.136.191.25:6379/1' | docker secret create taskiq_worker_url -
-echo 'redis://default:kamronbek2003@94.136.191.25:6379/2' | docker secret create taskiq_redis_schedule_source_url -
-echo 'redis://default:kamronbek2003@94.136.191.25:6379/3' | docker secret create taskiq_scheduler_url -
+echo 'rediss://207.154.199.121:redis_password@redis:6379?ssl_cert_reqs=CERT_REQUIRED&ssl_ca_certs=/run/secrets/ca-cert&ssl_certfile=/run/secrets/client-cert&ssl_keyfile=/run/secrets/client-key' | docker secret create redis-url -
+echo 'redis://default:redis_password@207.154.199.121:6379/1' | docker secret create taskiq-worker-url -
+echo 'redis://default:redis_password@207.154.199.121:6379/2' | docker secret create taskiq-redis_schedule_source-url -
+echo 'redis://default:redis_password@207.154.199.121:6379/3' | docker secret create taskiq-scheduler-url -
 
-# MINIO
+# OBJECT STORAGE
 echo 'kamronbek' | docker secret create minio_root_user -
-echo 'kamronbek2003' | docker secret create minio_root_password -
-echo '94.136.191.25:9000' | docker secret create minio_endpoint -
-echo 'dev-bucket' | docker secret create minio_bucket_name -
+secret_key=n7zzLc5yZcnXA9f/v+vIVnP3pjxkE6NDNi4CEEnTM+E
+
+access_key_id=DO00J2BEN93Y8P6LBEYR
+
 
 # FASTAPI-JWT
 echo 'f94b638b565c503932b657534d1f044b7f1c8acfb76170e80851704423a49186' | docker secret create secret_key -
@@ -269,99 +279,3 @@ Add others similarly:
 ```bash
 docker stack deploy -c cluster/swarm/monitoring/grafana.yml monitoring-stack
 ```
-
----
-
-## 🧪 6. Useful Commands
-
-- List stacks:
-
-  ```bash
-  docker stack ls
-  ```
-
-- List services:
-
-  ```bash
-  docker service ls
-  ```
-
-- Remove a service:
-
-  ```bash
-  docker service rm <SERVICE_ID>
-  ```
-
-- Check nodes:
-
-  ```bash
-  docker node ls
-  ```
-
-- Check logs:
-
-  ```bash
-  docker service logs <SERVICE_NAME>
-  ```
-
-- Run a test service:
-
-  ```bash
-  docker service create --replicas 2 -p 80:80 nginx
-  ```
-
----
-
-## 🌍 7. Access Services via Subdomains (Traefik)
-
-Make sure DNS A records point to your **manager node IP**:
-
-- `https://traefik.kronk.uz`
-- `https://grafana.kronk.uz`
-- `https://prometheus.kronk.uz`
-- `https://portainer.kronk.uz`
-
----
-
-## 🗃️ Project Structure Overview
-
-```plaintext
-~/Documents/deployment
-├── cluster
-│   └── swarm
-│       ├── backend
-│       │   └── backend_stack.yml
-│       ├── monitoring
-│       │   ├── alertmanager/
-│       │   ├── grafana.yml
-│       │   ├── loki/
-│       │   ├── prometheus/
-│       │   └── promtail.yml
-│       └── traefik
-│           ├── config/
-│           └── traefik.yml
-├── pod
-│   └── FastAPI source code & Dockerfile
-├── service
-│   ├── configurations
-│   └── docker-compose.yml
-└── README.md
-```
-
----
-
-## 🧠 Docker Context Info
-
-```bash
-docker context ls
-```
-
-Example:
-
-```plaintext
-NAME        DESCRIPTION                               DOCKER ENDPOINT               ERROR
-default *   Current DOCKER_HOST based configuration   unix:///var/run/docker.sock   
-dev-kronk                                             ssh://root@178.212.35.106     
-```
-
-Now you’re ready to manage, deploy, and teach Docker Swarm workflows! 🚀

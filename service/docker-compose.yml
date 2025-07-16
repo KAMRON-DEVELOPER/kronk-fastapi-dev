@@ -2,15 +2,30 @@ services:
   postgres:
     image: postgres:alpine
     container_name: postgres_container
-    restart: always
-    env_file:
-      - ./.env
+    restart: unless-stopped
     ports:
       - "5432:5432"
+    secrets:
+      - postgres-db
+      - postgres-user
+      - postgres-password
+      - postgres-cert
+      - postgres-key
+      - ca-cert
+    environment:
+      - POSTGRES_DB=postgres-db
+      - POSTGRES_USER=postgres-user
+      - POSTGRES_PASSWORD=postgres-password
     volumes:
+      - ./configurations/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./configurations/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
       - ./volumes/postgres_storage:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}",
+        ]
       interval: 5s
       timeout: 5s
       retries: 3
@@ -18,55 +33,62 @@ services:
   redis:
     image: redis/redis-stack-server:latest
     container_name: redis_container
-    restart: always
+    restart: unless-stopped
     command:
       [
         "redis-server",
-        "/redis-stack.conf",
+        "/redis.conf",
         "--requirepass",
         "${REDIS_PASSWORD}",
       ]
-    env_file:
-      - ./.env
     ports:
       - "6379:6379"
+    secrets:
+      - redis-user
+      - redis-password
+      - redis-cert
+      - redis-key
+      - ca-cert
+    environment:
+      - REDIS_USER=redis-user
+      - REDIS_PASSWORD=redis-password
     volumes:
-      - ./configurations/redis-stack.conf:/redis-stack.conf:ro
+      - ./configurations/redis.conf:/redis.conf:ro
       - ./volumes/redis_storage:/data
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD} ping | grep PONG"]
+      test:
+        [
+          "CMD-SHELL",
+          "redis-cli -a ${REDIS_PASSWORD} ping | grep PONG",
+        ]
       interval: 5s
       timeout: 5s
       retries: 3
-
-  minio:
-    image: minio/minio:latest
-    container_name: minio_container
-    restart: always
-    command: minio server /minio_storage
-    env_file:
-      - ./.env
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - ./volumes/minio_storage:/minio_storage
-
-  redisinsight:
-    image: redis/redisinsight:latest
-    container_name: redisinsight_container
-    restart: always
-    ports:
-      - "5540:5540"
-    volumes:
-      - redisinsight_storage:/data
 
 volumes:
   postgres_storage:
     name: postgres_storage_volume
   redis_storage:
     name: redis_storage_volume
-  minio_storage:
-    name: minio_storage_volume
-  redisinsight_storage:
-    name: redisinsight_storage_volume
+
+secrets:
+  POSTGRES_DB:
+    external: true
+  POSTGRES_USER:
+    external: true
+  POSTGRES_PASSWORD:
+    external: true
+  REDIS_USER:
+    external: true
+  REDIS_PASSWORD:
+    external: true
+  ca-cert:
+    external: true
+  redis-cert:
+    external: true
+  redis-key:
+    external: true
+  postgres-cert:
+    external: true
+  postgres-key:
+    external: true

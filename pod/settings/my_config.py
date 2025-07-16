@@ -3,8 +3,6 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-DEBUG = 0
-
 
 class Settings(BaseSettings):
     BASE_DIR: Path = Path(__file__).parent.parent.parent.resolve()
@@ -47,13 +45,26 @@ class Settings(BaseSettings):
     FIREBASE_AUTH_PROVIDER_X509_CERT_URI: str = ""
     FIREBASE_CLIENT_CERT_URL: str = ""
 
-    # AZURE TRANSLATOR
-    AZURE_TRANSLATOR_KEY: str = ""
-    AZURE_TRANSLATOR_REGION: str = ""
-    AZURE_TRANSLATOR_ENDPOINT: str = ""
+    @property
+    def database_url(self) -> str:
+        host = "localhost" if self.DEBUG else "postgres.kronk.uz"
+        port = 5432
+        dbname = "kronkdb"
+        user = "postgres"
+        password = "yourpassword"
+
+        if self.DEBUG:
+            return f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{dbname}"
+        return (
+            f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{dbname}"
+            f"?sslmode=verify-full"
+            f"&sslrootcert=/run/secrets/fastapi_ca.pem"
+            f"&sslcert=/run/secrets/fastapi_client_cert.pem"
+            f"&sslkey=/run/secrets/fastapi_client_key.pem"
+        )
 
     @property
-    def firebase_adminsdk_dev(self) -> dict:
+    def firebase_adminsdk(self) -> dict:
         return {
             "type": self.FIREBASE_TYPE,
             "project_id": self.FIREBASE_PROJECT_ID,
@@ -65,7 +76,7 @@ class Settings(BaseSettings):
             "token_uri": self.FIREBASE_TOKEN_URI,
             "auth_provider_x509_cert_url": self.FIREBASE_AUTH_PROVIDER_X509_CERT_URI,
             "client_x509_cert_url": self.FIREBASE_CLIENT_CERT_URL,
-        }
+        } if not self.DEBUG else "/run/secrets/FIREBASE_ADMINSDK"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore", secrets_dir="/run/secrets" if not bool(DEBUG) else None)
 
