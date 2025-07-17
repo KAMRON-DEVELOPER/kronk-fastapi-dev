@@ -22,8 +22,31 @@ from utility.validators import escape_redisearch_special_chars
 
 settings = get_settings()
 
-my_cache_redis: CacheRedis = CacheRedis.from_url(url=f"{settings.REDIS_URL}", db=0, decode_responses=True, auto_close_connection_pool=True)
-my_search_redis: SearchRedis = SearchRedis.from_url(url=f"{settings.REDIS_URL}", db=0, decode_responses=True)
+my_cache_redis: CacheRedis = CacheRedis(
+    host=settings.REDIS_HOST,
+    password=settings.REDIS_PASSWORD,
+    db=0,
+    decode_responses=True,
+    auto_close_connection_pool=True,
+    ssl=True,
+    ssl_ca_certs="ca.pem",
+    ssl_certfile="/run/secrets/fastapi_client_cert.pem",
+    ssl_keyfile="fastapi_client_key.pem",
+    ssl_cert_reqs="required",
+    ssl_check_hostname=True
+)
+my_search_redis: SearchRedis = SearchRedis(
+    host=settings.REDIS_HOST,
+    password=settings.REDIS_PASSWORD,
+    db=0,
+    decode_responses=True,
+    ssl=True,
+    ssl_ca_certs="ca.pem",
+    ssl_keyfile="fastapi_client_key.pem",
+    ssl_certfile="/run/secrets/fastapi_client_cert.pem",
+    ssl_cert_reqs="required",
+    ssl_check_hostname=True,
+)
 
 USER_INDEX_NAME = "idx:users"
 feed_INDEX_NAME = "idx:feeds"

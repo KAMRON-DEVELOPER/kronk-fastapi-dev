@@ -15,7 +15,8 @@ class Settings(BaseSettings):
     DATABASE_URL: str = ""
 
     # REDIS & TASKIQ
-    REDIS_URL: str = ""
+    REDIS_HOST: str = ""
+    REDIS_PASSWORD: str = ""
 
     # FIREBASE ADMIN SDK
     FIREBASE_ADMINSDK: str = ""

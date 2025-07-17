@@ -136,31 +136,30 @@ sudo mkdir -p /run/secrets
 You can link or copy secrets manually:
 
 ```bash
-# Example values — replace with your local settings
+# POSTGRES
+echo "kronk_db" | sudo tee POSTGRES_DB
+echo "kamronbek" | sudo tee POSTGRES_USER
+echo "kamronbek2003" | sudo tee POSTGRES_PASSWORD
+echo "postgresql+asyncpg://{POSTGRES_USER}:{POSTGRES_PASSWORD}@localhost:5432/{POSTGRES_DB}?ssl=verify-full&slrootcert=/run/secrets/ca.pem&sslcert=/run/secrets/fastapi_client_cert.crt&sslkey=/run/secrets/fastapi_client_key.pem" | sudo tee /run/secrets/DATABASE_URL
 
-echo "get from .env" | sudo tee /run/secrets/DATABASE_URL
-
-echo "rediss://default:kamronbek2003@localhost:6379/0" | sudo tee /run/secrets/REDIS_URL
-
-# Taskiq URLs
-sudo tee /run/secrets/TASKIQ_WORKER_URL <<< "redis://localhost:6379/0"
-sudo tee /run/secrets/TASKIQ_REDIS_SCHEDULE_SOURCE_URL <<< "redis://localhost:6379/1"
-sudo tee /run/secrets/TASKIQ_RESULT_BACKEND_URL <<< "redis://localhost:6379/2"
+# REDIS
+echo "default" | sudo tee /run/secrets/REDIS_USER
+echo "kamronbek2003" | sudo tee /run/secrets/REDIS_PASSWORD
+echo "localhost" | sudo tee /run/secrets/REDIS_HOST
 
 # Firebase
 cp ./secrets/firebase-adminsdk.json /run/secrets/FIREBASE_ADMINSDK
 
-# S3
-sudo tee /run/secrets/S3_ENDPOINT <<< "https://s3.local"
-sudo tee /run/secrets/S3_ACCESS_KEY_ID <<< "local_access_key"
-sudo tee /run/secrets/S3_SECRET_KEY <<< "local_secret_key"
-sudo tee /run/secrets/S3_BUCKET_NAME <<< "kronk-local"
+echo "https://fra1.digitaloceanspaces.com" | sudo tee /run/secrets/S3_ENDPOINT
+echo "DO00J2BEN93Y8P6LBEYR" | sudo tee /run/secrets/S3_ACCESS_KEY_ID
+echo "n7zzLc5yZcnXA9f/v+vIVnP3pjxkE6NDNi4CEEnTM+E" | sudo tee /run/secrets/S3_SECRET_KEY
+echo "kronk-bucket" | sudo tee /run/secrets/S3_BUCKET_NAME
 
-# JWT
-sudo tee /run/secrets/SECRET_KEY <<< "mysecret"
+# FASTAPI-JWT
+echo "f94b638b565c503932b657534d1f044b7f1c8acfb76170e80851704423a49186" | sudo tee /run/secrets/SECRET_KEY
 
-# Email API Key
-sudo tee /run/secrets/EMAIL_SERVICE_API_KEY <<< "dummy-sendgrid-api-key"
+# EMAIL
+echo "wSsVR61z+0b3Bq9+mzWtJOc+yAxSUgv1HEx93Qaoun79Sv7KosduxECdBw/1HPBLGDNpQWAU9bN/yx0C0GUN2dh8mVAGDSiF9mqRe1U4J3x17qnvhDzIWWtYlxGNLIkLzwlumWdiEssi+g==" |sudo tee /run/secrets/EMAIL_SERVICE_API_KEY
 ```
 
 ---
