@@ -16,27 +16,24 @@ class Settings(BaseSettings):
 
     # REDIS & TASKIQ
     REDIS_URL: str = ""
-    TASKIQ_WORKER_URL: str = ""
-    TASKIQ_REDIS_SCHEDULE_SOURCE_URL: str = ""
-    TASKIQ_RESULT_BACKEND_URL: str = ""
 
     # FIREBASE ADMIN SDK
     FIREBASE_ADMINSDK: str = ""
 
     # S3
-    S3_ENDPOINT: str = "/run/secrets/S3_ENDPOINT"
-    S3_ACCESS_KEY_ID: str = "/run/secrets/S3_ACCESS_KEY_ID"
-    S3_SECRET_KEY: str = "/run/secrets/S3_SECRET_KEY"
-    S3_BUCKET_NAME: str = "/run/secrets/S3_BUCKET_NAME"
+    S3_ACCESS_KEY_ID: str = ""
+    S3_SECRET_KEY: str = ""
+    S3_ENDPOINT: str = ""
+    S3_BUCKET_NAME: str = ""
 
     # FASTAPI JWT
-    SECRET_KEY: str = "/run/secrets/SECRET_KEY"
+    SECRET_KEY: str = ""
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_TIME: int = 60
     REFRESH_TOKEN_EXPIRE_TIME: int = 7
 
     # EMAIL
-    EMAIL_SERVICE_API_KEY: str = "/run/secrets/EMAIL_SERVICE_API_KEY"
+    EMAIL_SERVICE_API_KEY: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore", secrets_dir="/run/secrets")
 

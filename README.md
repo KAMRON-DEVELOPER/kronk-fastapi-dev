@@ -138,9 +138,9 @@ You can link or copy secrets manually:
 ```bash
 # Example values — replace with your local settings
 
-echo "postgresql://dev_user:dev_pass@localhost:5432/dev_db?sslmode=require" | sudo tee /run/secrets/DATABASE_URL
+echo "get from .env" | sudo tee /run/secrets/DATABASE_URL
 
-echo "rediss://:dev_pass@localhost:6379/0" | sudo tee /run/secrets/REDIS_URL
+echo "rediss://default:kamronbek2003@localhost:6379/0" | sudo tee /run/secrets/REDIS_URL
 
 # Taskiq URLs
 sudo tee /run/secrets/TASKIQ_WORKER_URL <<< "redis://localhost:6379/0"

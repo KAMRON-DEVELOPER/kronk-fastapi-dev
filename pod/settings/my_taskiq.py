@@ -7,10 +7,10 @@ from settings.my_config import get_settings
 settings = get_settings()
 
 broker = ListQueueBroker(
-    url=settings.TASKIQ_WORKER_URL,
-).with_result_backend(result_backend=RedisAsyncResultBackend(redis_url=settings.TASKIQ_RESULT_BACKEND_URL, result_ex_time=600))
+    url=settings.REDIS_URL,
+).with_result_backend(result_backend=RedisAsyncResultBackend(redis_url=settings.REDIS_URL, result_ex_time=600))
 
-redis_schedule_source = RedisScheduleSource(url=settings.TASKIQ_REDIS_SCHEDULE_SOURCE_URL)
+redis_schedule_source = RedisScheduleSource(url=settings.REDIS_URL)
 
 scheduler = TaskiqScheduler(
     broker=broker,
