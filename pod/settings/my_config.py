@@ -24,14 +24,10 @@ class Settings(BaseSettings):
     FIREBASE_ADMINSDK: str = "/run/secrets/FIREBASE_ADMINSDK"
 
     # S3
+    S3_ENDPOINT: str = "/run/secrets/S3_ENDPOINT"
     S3_ACCESS_KEY_ID: str = "/run/secrets/S3_ACCESS_KEY_ID"
-    S3_SECRET_ACCESS_KEY: str = "/run/secrets/S3_SECRET_ACCESS_KEY"
-
-    # MINIO
-    MINIO_ROOT_USER: str = "/run/secrets/MINIO_ROOT_USER"
-    MINIO_ROOT_PASSWORD: str = "/run/secrets/MINIO_ROOT_PASSWORD"
-    MINIO_ENDPOINT: str = "/run/secrets/MINIO_ENDPOINT"
-    MINIO_BUCKET_NAME: str = "/run/secrets/MINIO_BUCKET_NAME"
+    S3_SECRET_KEY: str = "/run/secrets/S3_SECRET_KEY"
+    S3_BUCKET_NAME: str = "/run/secrets/S3_BUCKET_NAME"
 
     # FASTAPI JWT
     SECRET_KEY: str = "/run/secrets/SECRET_KEY"

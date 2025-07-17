@@ -1,25 +1,23 @@
 # 🐳 Docker Swarm Deployment Guide for Kronk
 
-## 1. 🔐 Certificate Authority (CA)
-
-```bash
-mkdir -p ~/certs/ca && cd ~/certs/ca
-openssl genrsa -aes256 -out ca-key.pem 4096
-openssl req -new -x509 -days 3650 -key ca-key.pem -sha256 -out ca.pem -subj "/CN=Kronk Root CA"
-```
+## TLS
 
 > **Note**: The `ca.pem` file is the Certificate Authority certificate used to verify signed certificates.
 >
 > **Warning**: The `ca-key.pem` file is the CA private key. **Store it securely** and **never store it as a Docker secret** in production.
 
----
-
-## 2. 🚀 Docker Daemon TLS (for Prometheus)
-
 ```bash
-mkdir -p ~/certs/docker && cd ~/certs/docker
+# **************** 1. 🔐 Certificate Authority (CA) ****************
+mkdir -p ~/certs/ca && cd ~/certs/ca
+openssl genrsa -aes256 -out ca-key.pem 4096
+openssl req -new -x509 -days 3650 -key ca-key.pem -sha256 -out ca.pem -subj "/CN=Kronk Root CA"
 
+
+
+
+# **************** 2. 🔐 Docker Daemon TLS (for Prometheus) ****************
 # Server certificate
+mkdir -p ~/certs/docker && cd ~/certs/docker
 openssl genrsa -out docker-server-key.pem 4096
 openssl req -new -key docker-server-key.pem -out docker-server.csr -subj "/CN=127.0.0.1"
 echo "subjectAltName = DNS:localhost,IP:127.0.0.1" > docker-ext.cnf
@@ -34,13 +32,57 @@ openssl x509 -req -in docker-client.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.pem
 
 # Create Docker secrets
 cd ~/certs/docker
-
 docker secret create docker_ca.pem ../ca/ca.pem
 docker secret create docker_server_cert.pem docker-server-cert.pem
 docker secret create docker_server_key.pem docker-server-key.pem
 docker secret create docker_client_cert.pem docker-client-cert.pem
 docker secret create docker_client_key.pem docker-client-key.pem
+
+
+
+
+# **************** 3. 🔐 Redis and PostgreSQL TLS (for FastAPI) ****************
+
+# Redis Prod
+mkdir -p ~/certs/redis && cd ~/certs/redis
+openssl genrsa -out redis-server-key.pem 4096
+openssl req -new -key redis-server-key.pem -out redis-server-prod.csr -subj "/CN=redis.kronk.uz"
+echo "subjectAltName = DNS:redis.kronk.uz" > redis-ext-prod.cnf
+echo "extendedKeyUsage = serverAuth" >> redis-ext-prod.cnf
+openssl x509 -req -in redis-server-prod.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.pem -CAcreateserial -out redis-server-prod-cert.pem -days 3650 -sha256 -extfile redis-ext-prod.cnf
+
+# Redis Dev
+openssl req -new -key redis-server-key.pem -out redis-server-dev.csr -subj "/CN=127.0.0.1"
+echo "subjectAltName = DNS:localhost,IP:127.0.0.1" > redis-ext-dev.cnf
+echo "extendedKeyUsage = serverAuth" >> redis-ext-dev.cnf
+openssl x509 -req -in redis-server-dev.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.pem -CAcreateserial -out redis-server-dev-cert.pem -days 3650 -sha256 -extfile redis-ext-dev.cnf
+
+# PostgreSQL Prod
+mkdir -p ~/certs/postgres && cd ~/certs/postgres
+openssl genrsa -out pg-server-key.pem 4096
+openssl req -new -key pg-server-key.pem -out pg-server-prod.csr -subj "/CN=postgres.kronk.uz"
+echo "subjectAltName = DNS:postgres.kronk.uz" > pg-ext-prod.cnf
+echo "extendedKeyUsage = serverAuth" >> pg-ext-prod.cnf
+openssl x509 -req -in pg-server-prod.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.pem -CAcreateserial -out pg-server-prod-cert.pem -days 3650 -sha256 -extfile pg-ext-prod.cnf
+
+# PostgreSQL Dev
+openssl req -new -key pg-server-key.pem -out pg-server-dev.csr -subj "/CN=127.0.0.1"
+echo "subjectAltName = DNS:localhost,IP:127.0.0.1" > pg-ext-dev.cnf
+echo "extendedKeyUsage = serverAuth" >> pg-ext-dev.cnf
+openssl x509 -req -in pg-server-dev.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.pem -CAcreateserial -out pg-server-dev-cert.pem -days 3650 -sha256 -extfile pg-ext-dev.cnf
+
+# FastAPI Client (shared for Redis and PostgreSQL)
+mkdir -p ~/certs/fastapi && cd ~/certs/fastapi
+openssl genrsa -out fastapi-client-key.pem 4096
+openssl req -new -key fastapi-client-key.pem -out fastapi-client.csr -subj "/CN=fastapi"
+echo "extendedKeyUsage = clientAuth" > client-ext.cnf
+openssl x509 -req -in fastapi-client.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.pem -CAcreateserial -out fastapi-client-cert.pem -days 3650 -sha256 -extfile client-ext.cnf
 ```
+
+---
+---
+
+## Small Configurations & Usage Guide
 
 ### Update `/etc/docker/daemon.json`
 
@@ -77,84 +119,33 @@ scrape_configs:
 ```
 
 ---
-
-## 3. 🔐 Redis and PostgreSQL TLS
-
-```bash
-# Redis Prod
-mkdir -p ~/certs/redis && cd ~/certs/redis
-openssl genrsa -out redis-server-key.pem 4096
-openssl req -new -key redis-server-key.pem -out redis-server-prod.csr -subj "/CN=redis.kronk.uz"
-echo "subjectAltName = DNS:redis.kronk.uz" > redis-ext-prod.cnf
-echo "extendedKeyUsage = serverAuth" >> redis-ext-prod.cnf
-openssl x509 -req -in redis-server-prod.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.pem -CAcreateserial -out redis-server-prod-cert.pem -days 3650 -sha256 -extfile redis-ext-prod.cnf
-
-# Redis Dev
-openssl req -new -key redis-server-key.pem -out redis-server-dev.csr -subj "/CN=127.0.0.1"
-echo "subjectAltName = DNS:localhost,IP:127.0.0.1" > redis-ext-dev.cnf
-echo "extendedKeyUsage = serverAuth" >> redis-ext-dev.cnf
-openssl x509 -req -in redis-server-dev.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.pem -CAcreateserial -out redis-server-dev-cert.pem -days 3650 -sha256 -extfile redis-ext-dev.cnf
-
-# PostgreSQL Prod
-mkdir -p ~/certs/postgres && cd ~/certs/postgres
-openssl genrsa -out pg-server-key.pem 4096
-openssl req -new -key pg-server-key.pem -out pg-server-prod.csr -subj "/CN=postgres.kronk.uz"
-echo "subjectAltName = DNS:postgres.kronk.uz" > pg-ext-prod.cnf
-echo "extendedKeyUsage = serverAuth" >> pg-ext-prod.cnf
-openssl x509 -req -in pg-server-prod.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.pem -CAcreateserial -out pg-server-prod-cert.pem -days 3650 -sha256 -extfile pg-ext-prod.cnf
-
-# PostgreSQL Dev
-openssl req -new -key pg-server-key.pem -out pg-server-dev.csr -subj "/CN=127.0.0.1"
-echo "subjectAltName = DNS:localhost,IP:127.0.0.1" > pg-ext-dev.cnf
-echo "extendedKeyUsage = serverAuth" >> pg-ext-dev.cnf
-openssl x509 -req -in pg-server-dev.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.pem -CAcreateserial -out pg-server-dev-cert.pem -days 3650 -sha256 -extfile pg-ext-dev.cnf
-
-# FastAPI Client (shared for Redis and PostgreSQL)
-mkdir -p ~/certs/fastapi && cd ~/certs/fastapi
-openssl genrsa -out fastapi-client-key.pem 4096
-openssl req -new -key fastapi-client-key.pem -out fastapi-client.csr -subj "/CN=fastapi"
-echo "extendedKeyUsage = clientAuth" > client-ext.cnf
-openssl x509 -req -in fastapi-client.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.pem -CAcreateserial -out fastapi-client-cert.pem -days 3650 -sha256 -extfile client-ext.cnf
-
-
-docker secret create ca.pem certs/ca/ca.pem
-
-docker secret create redis_server_key.pem certs/redis/redis-server-key.pem
-docker secret create redis_server_prod_cert.pem certs/redis/redis-server-prod-cert.pem
-docker secret create redis_server_dev_cert.pem certs/redis/redis-server-dev-cert.pem
-
-docker secret create pg_server_key.pem certs/postgres/pg-server-key.pem
-docker secret create pg_server_prod_cert.pem certs/postgres/pg-server-prod-cert.pem
-docker secret create pg_server_dev_cert.pem certs/postgres/pg-server-dev-cert.pem
-
-docker secret create fastapi_client_key.pem certs/fastapi/fastapi-client-key.pem
-docker secret create fastapi_client_cert.pem certs/fastapi/fastapi-client-cert.pem
-```
-
-### Example URLs
-
-```.env
-rediss://:password@redis.internal:6379/0?ssl_cert_reqs=required&ssl_ca_certs=/run/secrets/fastapi_ca.pem&ssl_certfile=/run/secrets/fastapi_client_cert.pem&ssl_keyfile=/run/secrets/fastapi_client_key.pem
-postgresql://user:password@postgres.internal:5432/dbname?sslmode=verify-full&sslrootcert=/run/secrets/fastapi_ca.pem&sslcert=/run/secrets/fastapi_client_cert.pem&sslkey=/run/secrets/fastapi_client_key.pem
-```
-
 ---
 
 ## 4. 🔑 Docker Secrets Creation
 
-All secrets for:
+### 🐳 On VPS Manager (only secrets needed by fastapi)
 
-- Docker TLS
-- Database
-- Redis
-- Object storage
-- JWT tokens
-- Firebase
-- Azure Translator
-- Grafana / Traefik
+```bash
+# for prometheus & fastapi
+docker secret create ca.pem certs/ca/ca.pem
+docker secret create fastapi_client_cert.pem certs/fastapi/fastapi-client-cert.pem
+docker secret create fastapi_client_key.pem certs/fastapi/fastapi-client-key.pem
+docker secret create fastapi_client_cert.pem certs/fastapi/fastapi-client-cert.pem
+docker secret create fastapi_client_key.pem certs/fastapi/fastapi-client-key.pem
+```
 
-(Already included above in prior code blocks)
+### 🐳 On VPS with Redis & PostgreSQL (Prod Swarm Node)
 
+```bash
+# for redis & postgres
+docker secret create ca.pem certs/ca/ca.pem
+docker secret create redis_server_cert.pem certs/redis/redis-server-prod-cert.pem
+docker secret create redis_server_key.pem certs/redis/redis-server-key.pem
+docker secret create pg_server_cert.pem certs/postgres/pg-server-prod-cert.pem
+docker secret create pg_server_key.pem certs/postgres/pg-server-key.pem
+```
+
+---
 ---
 
 ## 5. 🔧 Initialize Docker Swarm

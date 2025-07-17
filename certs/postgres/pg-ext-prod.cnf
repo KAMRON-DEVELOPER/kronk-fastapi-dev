@@ -1,0 +1,2 @@
+subjectAltName = DNS:postgres.kronk.uz
+extendedKeyUsage = serverAuth
