@@ -121,6 +121,51 @@ scrape_configs:
 ---
 ---
 
+## 🔧 Local Development Secret Setup
+
+> For FastAPI to run locally with secrets, it expects files at `/run/secrets/`. Docker secrets do **not** appear there during development - you must simulate them.
+
+### 📁 Create Local `/run/secrets` Directory
+
+```bash
+sudo mkdir -p /run/secrets
+```
+
+### 🔑 Populate Dummy Secrets for Development
+
+You can link or copy secrets manually:
+
+```bash
+# Example values — replace with your local settings
+
+echo "postgresql://dev_user:dev_pass@localhost:5432/dev_db?sslmode=require" | sudo tee /run/secrets/DATABASE_URL
+
+echo "rediss://:dev_pass@localhost:6379/0" | sudo tee /run/secrets/REDIS_URL
+
+# Taskiq URLs
+sudo tee /run/secrets/TASKIQ_WORKER_URL <<< "redis://localhost:6379/0"
+sudo tee /run/secrets/TASKIQ_REDIS_SCHEDULE_SOURCE_URL <<< "redis://localhost:6379/1"
+sudo tee /run/secrets/TASKIQ_RESULT_BACKEND_URL <<< "redis://localhost:6379/2"
+
+# Firebase
+cp ./secrets/firebase-adminsdk.json /run/secrets/FIREBASE_ADMINSDK
+
+# S3
+sudo tee /run/secrets/S3_ENDPOINT <<< "https://s3.local"
+sudo tee /run/secrets/S3_ACCESS_KEY_ID <<< "local_access_key"
+sudo tee /run/secrets/S3_SECRET_KEY <<< "local_secret_key"
+sudo tee /run/secrets/S3_BUCKET_NAME <<< "kronk-local"
+
+# JWT
+sudo tee /run/secrets/SECRET_KEY <<< "mysecret"
+
+# Email API Key
+sudo tee /run/secrets/EMAIL_SERVICE_API_KEY <<< "dummy-sendgrid-api-key"
+```
+
+---
+---
+
 ## 4. 🔑 Docker Secrets Creation
 
 ### 🐳 On VPS Manager (only secrets needed by fastapi)
@@ -128,10 +173,24 @@ scrape_configs:
 ```bash
 # for prometheus & fastapi
 docker secret create ca.pem certs/ca/ca.pem
+docker secret create docker_client_cert.pem certs/docker/docker-client-cert.pem
+docker secret create docker_client_key.pem certs/docker/docker-client-key.pem
+
 docker secret create fastapi_client_cert.pem certs/fastapi/fastapi-client-cert.pem
 docker secret create fastapi_client_key.pem certs/fastapi/fastapi-client-key.pem
-docker secret create fastapi_client_cert.pem certs/fastapi/fastapi-client-cert.pem
-docker secret create fastapi_client_key.pem certs/fastapi/fastapi-client-key.pem
+
+DATABASE_URL
+REDIS_URL
+TASKIQ_WORKER_URL
+TASKIQ_RESULT_BACKEND_URL
+TASKIQ_REDIS_SCHEDULE_SOURCE_URL
+FIREBASE_ADMINSDK
+S3_ENDPOINT
+S3_ACCESS_KEY_ID
+S3_SECRET_KEY
+S3_BUCKET_NAME
+SECRET_KEY
+EMAIL_SERVICE_API_KEY
 ```
 
 ### 🐳 On VPS with Redis & PostgreSQL (Prod Swarm Node)

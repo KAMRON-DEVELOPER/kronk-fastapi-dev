@@ -12,16 +12,16 @@ class Settings(BaseSettings):
     DEBUG: int = 1
 
     # DATABASE
-    DATABASE_URL: str = "/run/secrets/DATABASE_URL"
+    DATABASE_URL: str = ""
 
     # REDIS & TASKIQ
-    REDIS_URL: str = "/run/secrets/REDIS_URL"
-    TASKIQ_WORKER_URL: str = "/run/secrets/TASKIQ_WORKER_URL"
-    TASKIQ_REDIS_SCHEDULE_SOURCE_URL: str = "/run/secrets/TASKIQ_REDIS_SCHEDULE_SOURCE_URL"
-    TASKIQ_RESULT_BACKEND_URL: str = "/run/secrets/TASKIQ_RESULT_BACKEND_URL"
+    REDIS_URL: str = ""
+    TASKIQ_WORKER_URL: str = ""
+    TASKIQ_REDIS_SCHEDULE_SOURCE_URL: str = ""
+    TASKIQ_RESULT_BACKEND_URL: str = ""
 
     # FIREBASE ADMIN SDK
-    FIREBASE_ADMINSDK: str = "/run/secrets/FIREBASE_ADMINSDK"
+    FIREBASE_ADMINSDK: str = ""
 
     # S3
     S3_ENDPOINT: str = "/run/secrets/S3_ENDPOINT"
