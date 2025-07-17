@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     REDIS_PASSWORD: str = ""
 
     # FIREBASE ADMIN SDK
-    FIREBASE_ADMINSDK: str = ""
+    firebase_adminsdk: str = ""
 
     # S3
     S3_ACCESS_KEY_ID: str = ""

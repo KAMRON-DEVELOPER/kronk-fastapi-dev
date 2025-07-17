@@ -84,6 +84,15 @@ openssl x509 -req -in fastapi-client.csr -CA ../ca/ca.pem -CAkey ../ca/ca-key.pe
 
 ## Small Configurations & Usage Guide
 
+### Copy apropriate files like this
+
+```bash
+sudo mkdir -p /etc/docker/certs
+sudo cp ~/certs/docker/docker-server-cert.pem /etc/docker/certs/
+sudo cp ~/certs/docker/docker-server-key.pem /etc/docker/certs/
+sudo cp ~/certs/ca/ca.pem /etc/docker/certs/
+```
+
 ### Update `/etc/docker/daemon.json`
 
 ```json
@@ -137,15 +146,20 @@ You can link or copy secrets manually:
 
 ```bash
 # POSTGRES
-echo "kronk_db" | sudo tee POSTGRES_DB
-echo "kamronbek" | sudo tee POSTGRES_USER
-echo "kamronbek2003" | sudo tee POSTGRES_PASSWORD
-echo "postgresql+asyncpg://{POSTGRES_USER}:{POSTGRES_PASSWORD}@localhost:5432/{POSTGRES_DB}?ssl=verify-full&slrootcert=/run/secrets/ca.pem&sslcert=/run/secrets/fastapi_client_cert.crt&sslkey=/run/secrets/fastapi_client_key.pem" | sudo tee /run/secrets/DATABASE_URL
+echo "kronk_db" | docker secret create POSTGRES_DB -
+echo "kamronbek" | docker secret create POSTGRES_USER -
+echo "kamronbek2003" | docker secret create POSTGRES_PASSWORD -
+echo "postgresql+asyncpg://kamronbek:kamronbek2003@localhost:5432/kronk_db?ssl=verify-full&slrootcert=/run/secrets/ca.pem&sslcert=/run/secrets/fastapi_client_cert.crt&sslkey=/run/secrets/fastapi_client_key.pem" | sudo tee /run/secrets/DATABASE_URL
 
-# REDIS
+# REDIS for fastapi & uvicorn
 echo "default" | sudo tee /run/secrets/REDIS_USER
 echo "kamronbek2003" | sudo tee /run/secrets/REDIS_PASSWORD
 echo "localhost" | sudo tee /run/secrets/REDIS_HOST
+
+# REDIS for local compose
+echo "default" | docker secret create REDIS_USER -
+echo "kamronbek2003" | docker secret create REDIS_PASSWORD -
+echo "localhost" | docker secret create REDIS_HOST -
 
 # Firebase
 cp ./secrets/firebase-adminsdk.json /run/secrets/FIREBASE_ADMINSDK
@@ -178,18 +192,28 @@ docker secret create docker_client_key.pem certs/docker/docker-client-key.pem
 docker secret create fastapi_client_cert.pem certs/fastapi/fastapi-client-cert.pem
 docker secret create fastapi_client_key.pem certs/fastapi/fastapi-client-key.pem
 
-DATABASE_URL
-REDIS_URL
-TASKIQ_WORKER_URL
-TASKIQ_RESULT_BACKEND_URL
-TASKIQ_REDIS_SCHEDULE_SOURCE_URL
-FIREBASE_ADMINSDK
-S3_ENDPOINT
-S3_ACCESS_KEY_ID
-S3_SECRET_KEY
-S3_BUCKET_NAME
-SECRET_KEY
-EMAIL_SERVICE_API_KEY
+# POSTGRES
+echo "postgresql+asyncpg://kamronbek:kamronbek2003@localhost:5432/kronk_db?ssl=verify-full&sslrootcert=/run/secrets/ca.pem&sslcert=/run/secrets/fastapi_client_cert.crt&sslkey=/run/secrets/fastapi_client_key.pem" | docker secret create DATABASE_URL -
+
+# REDIS
+echo "default" | docker secret create REDIS_USER -
+echo "kamronbek2003" | docker secret create REDIS_PASSWORD -
+echo "localhost" | docker secret create REDIS_HOST -
+
+# Firebase
+docker secret create FIREBASE_ADMINSDK firebase-adminsdk.json
+
+# S3 -
+echo "https://fra1.digitaloceanspaces.com" | docker secret create S3_ENDPOINT -
+echo "DO00J2BEN93Y8P6LBEYR" | docker secret create S3_ACCESS_KEY_ID -
+echo "n7zzLc5yZcnXA9f/v+vIVnP3pjxkE6NDNi4CEEnTM+E" | docker secret create S3_SECRET_KEY -
+echo "kronk-bucket" | docker secret create S3_BUCKET_NAME -
+
+# FASTAPI-JWT
+echo "f94b638b565c503932b657534d1f044b7f1c8acfb76170e80851704423a49186" | docker secret create SECRET_KEY -
+
+# EMAIL
+echo "wSsVR61z+0b3Bq9+mzWtJOc+yAxSUgv1HEx93Qaoun79Sv7KosduxECdBw/1HPBLGDNpQWAU9bN/yx0C0GUN2dh8mVAGDSiF9mqRe1U4J3x17qnvhDzIWWtYlxGNLIkLzwlumWdiEssi+g==" | docker secret create EMAIL_SERVICE_API_KEY -
 ```
 
 ### 🐳 On VPS with Redis & PostgreSQL (Prod Swarm Node)
@@ -201,6 +225,16 @@ docker secret create redis_server_cert.pem certs/redis/redis-server-prod-cert.pe
 docker secret create redis_server_key.pem certs/redis/redis-server-key.pem
 docker secret create pg_server_cert.pem certs/postgres/pg-server-prod-cert.pem
 docker secret create pg_server_key.pem certs/postgres/pg-server-key.pem
+
+# POSTGRES
+echo "kronk_db" | docker secret create POSTGRES_DB -
+echo "kamronbek" | docker secret create POSTGRES_USER -
+echo "kamronbek2003" | docker secret create POSTGRES_PASSWORD -
+
+# REDIS
+echo "default" | docker secret create REDIS_USER -
+echo "kamronbek2003" | docker secret create REDIS_PASSWORD -
+echo "localhost" | docker secret create REDIS_HOST -
 ```
 
 ---
